@@ -1,0 +1,326 @@
+import React from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  Pressable,
+} from 'react-native';
+import { router } from 'expo-router';
+import Animated, {
+  FadeInDown,
+  FadeInUp,
+  ZoomIn,
+} from 'react-native-reanimated';
+import { MaterialCommunityIcons, Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+import { GlassCard } from '../components/GlassCard';
+import { useGameStore } from '../store/gameStore';
+import { Colors, Spacing, BorderRadius } from '../constants/theme';
+
+export default function ResultsScreen() {
+  const insets = useSafeAreaInsets();
+  const {
+    playerScore,
+    opponentScore,
+    playerCorrectCount,
+    opponentCorrectCount,
+    totalRounds,
+    roundResults,
+    artistName,
+    resetGame,
+  } = useGameStore();
+
+  const playerWins = playerScore > opponentScore;
+  const isDraw = playerScore === opponentScore;
+
+  const handlePlayAgain = () => {
+    resetGame();
+    router.replace('/');
+  };
+
+  const outcomeEmoji = isDraw ? '🤝' : playerWins ? '🏆' : '😔';
+  const outcomeText = isDraw
+    ? "It's a Draw!"
+    : playerWins
+    ? 'You Win!'
+    : 'You Lost!';
+
+  return (
+    <View style={[styles.screen, { paddingTop: insets.top }]}>
+      <ScrollView
+        contentContainerStyle={[
+          styles.scrollContent,
+          { paddingBottom: insets.bottom + 40 },
+        ]}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Outcome */}
+        <Animated.View
+          entering={ZoomIn.delay(200).duration(500)}
+          style={styles.outcomeSection}
+        >
+          <Text style={styles.outcomeEmoji}>{outcomeEmoji}</Text>
+          <Text style={styles.outcomeText}>{outcomeText}</Text>
+          <Text style={styles.outcomeSubtext}>
+            {artistName} — {totalRounds} Rounds
+          </Text>
+        </Animated.View>
+
+        {/* Score Comparison */}
+        <Animated.View entering={FadeInDown.delay(400).duration(500)}>
+          <GlassCard borderRadius={24}>
+            <View style={styles.scoreRow}>
+              <View style={styles.scorePlayerBlock}>
+                <Text style={styles.scorePlayerLabel}>You</Text>
+                <Text style={styles.scorePlayerValue}>{playerScore}</Text>
+                <Text style={styles.scorePlayerStat}>
+                  {playerCorrectCount}/{totalRounds} correct
+                </Text>
+              </View>
+              <View style={styles.vsContainer}>
+                <Text style={styles.vsText}>VS</Text>
+              </View>
+              <View style={styles.scorePlayerBlock}>
+                <Text style={styles.scorePlayerLabel}>Alex</Text>
+                <Text style={styles.scorePlayerValueOpp}>
+                  {opponentScore}
+                </Text>
+                <Text style={styles.scorePlayerStat}>
+                  {opponentCorrectCount}/{totalRounds} correct
+                </Text>
+              </View>
+            </View>
+          </GlassCard>
+        </Animated.View>
+
+        {/* Round Breakdown */}
+        <Animated.View entering={FadeInDown.delay(550).duration(500)}>
+          <Text style={styles.sectionTitle}>Round Breakdown</Text>
+          <View style={styles.roundsList}>
+            {roundResults.map((result, index) => (
+              <Animated.View
+                key={index}
+                entering={FadeInDown.delay(600 + index * 60).duration(300)}
+              >
+                <GlassCard borderRadius={16} padding={16}>
+                  <View style={styles.roundRow}>
+                    <View style={styles.roundLeft}>
+                      <Text style={styles.roundIndex}>R{result.roundIndex}</Text>
+                      <View>
+                        <Text style={styles.roundAnswer} numberOfLines={1}>
+                          {result.playerAnswer || 'No answer'}
+                        </Text>
+                      </View>
+                    </View>
+                    <View style={styles.roundRight}>
+                      <View style={styles.roundScoreRow}>
+                        <MaterialCommunityIcons
+                          name={
+                            result.playerCorrect
+                              ? 'check-circle'
+                              : 'close-circle'
+                          }
+                          size={16}
+                          color={
+                            result.playerCorrect
+                              ? Colors.correct
+                              : Colors.incorrect
+                          }
+                        />
+                        <Text style={styles.roundPts}>
+                          +{result.playerPoints}
+                        </Text>
+                      </View>
+                    </View>
+                  </View>
+                </GlassCard>
+              </Animated.View>
+            ))}
+          </View>
+        </Animated.View>
+
+        {/* Actions */}
+        <Animated.View
+          entering={FadeInDown.delay(800).duration(500)}
+          style={styles.actions}
+        >
+          <Pressable style={styles.primaryButton} onPress={handlePlayAgain}>
+            <MaterialCommunityIcons
+              name="replay"
+              size={20}
+              color={Colors.background}
+            />
+            <Text style={styles.primaryButtonText}>Play Again</Text>
+          </Pressable>
+          <Pressable
+            style={styles.secondaryButton}
+            onPress={() => router.replace('/')}
+          >
+            <Text style={styles.secondaryButtonText}>Back to Home</Text>
+          </Pressable>
+        </Animated.View>
+      </ScrollView>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  screen: {
+    flex: 1,
+    backgroundColor: Colors.background,
+  },
+  scrollContent: {
+    padding: Spacing.containerPadding,
+    gap: Spacing.lg,
+  },
+
+  // Outcome
+  outcomeSection: {
+    alignItems: 'center',
+    paddingVertical: Spacing.xl,
+  },
+  outcomeEmoji: {
+    fontSize: 64,
+    marginBottom: Spacing.md,
+  },
+  outcomeText: {
+    fontFamily: 'Inter-Bold',
+    fontSize: 32,
+    color: Colors.primary,
+    marginBottom: 4,
+  },
+  outcomeSubtext: {
+    fontFamily: 'Inter',
+    fontSize: 14,
+    color: Colors.textSubtle,
+  },
+
+  // Scores
+  scoreRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  scorePlayerBlock: {
+    flex: 1,
+    alignItems: 'center',
+    gap: 4,
+  },
+  scorePlayerLabel: {
+    fontFamily: 'Inter',
+    fontSize: 12,
+    color: Colors.textMuted,
+    textTransform: 'uppercase',
+    letterSpacing: 1.5,
+  },
+  scorePlayerValue: {
+    fontFamily: 'Inter-Bold',
+    fontSize: 40,
+    color: Colors.primary,
+  },
+  scorePlayerValueOpp: {
+    fontFamily: 'Inter-Bold',
+    fontSize: 40,
+    color: Colors.textSubtle,
+  },
+  scorePlayerStat: {
+    fontFamily: 'Inter',
+    fontSize: 12,
+    color: Colors.textMuted,
+  },
+  vsContainer: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  vsText: {
+    fontFamily: 'Inter-Bold',
+    fontSize: 12,
+    color: Colors.textMuted,
+    letterSpacing: 1,
+  },
+
+  // Rounds
+  sectionTitle: {
+    fontFamily: 'Inter-Bold',
+    fontSize: 18,
+    color: Colors.primary,
+    marginBottom: 4,
+  },
+  roundsList: {
+    gap: Spacing.sm,
+  },
+  roundRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  roundLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.md,
+    flex: 1,
+  },
+  roundIndex: {
+    fontFamily: 'Inter-Bold',
+    fontSize: 13,
+    color: Colors.textMuted,
+    width: 28,
+  },
+  roundAnswer: {
+    fontFamily: 'Inter',
+    fontSize: 14,
+    color: Colors.onSurface,
+  },
+  roundRight: {
+    alignItems: 'flex-end',
+  },
+  roundScoreRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  roundPts: {
+    fontFamily: 'Inter-Bold',
+    fontSize: 14,
+    color: Colors.onSurface,
+  },
+
+  // Actions
+  actions: {
+    gap: Spacing.stackGap,
+    marginTop: Spacing.md,
+  },
+  primaryButton: {
+    backgroundColor: Colors.primary,
+    borderRadius: BorderRadius.lg,
+    paddingVertical: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  primaryButtonText: {
+    fontFamily: 'Inter-Bold',
+    fontSize: 16,
+    color: Colors.background,
+  },
+  secondaryButton: {
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderRadius: BorderRadius.lg,
+    borderWidth: 1,
+    borderColor: Colors.glassBorder,
+    paddingVertical: 16,
+    alignItems: 'center',
+  },
+  secondaryButtonText: {
+    fontFamily: 'Inter-Bold',
+    fontSize: 16,
+    color: Colors.textSubtle,
+  },
+});
