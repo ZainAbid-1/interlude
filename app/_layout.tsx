@@ -10,6 +10,9 @@ import {
   Inter_700Bold,
 } from '@expo-google-fonts/inter';
 import { PlayfairDisplay_700Bold } from '@expo-google-fonts/playfair-display';
+import { BebasNeue_400Regular } from '@expo-google-fonts/bebas-neue';
+import { Antonio_700Bold } from '@expo-google-fonts/antonio';
+import { LeagueGothic_400Regular } from '@expo-google-fonts/league-gothic';
 import * as SplashScreen from 'expo-splash-screen';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { Colors } from '../constants/theme';
@@ -22,6 +25,9 @@ export default function RootLayout() {
     Inter: Inter_400Regular,
     'Inter-Bold': Inter_700Bold,
     PlayfairDisplay: PlayfairDisplay_700Bold,
+    BebasNeue: BebasNeue_400Regular,
+    Antonio: Antonio_700Bold,
+    LeagueGothic: LeagueGothic_400Regular,
   });
 
   useEffect(() => {

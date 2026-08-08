@@ -26,17 +26,20 @@ import Animated, {
   FadeInDown,
   FadeInUp,
   SlideInUp,
+  Easing,
+  interpolate,
 } from 'react-native-reanimated';
 import { MaterialCommunityIcons, Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { GlassCard } from '../../components/GlassCard';
+import { AlbumCollageBackground } from '../../components/AlbumCollageBackground';
 import { RoomCodeInput } from '../../components/RoomCodeInput';
 import { useRoomStore } from '../../store/roomStore';
 import { useGameStore } from '../../store/gameStore';
 import { Colors, Spacing, BorderRadius, Typography } from '../../constants/theme';
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
 export default function HomeScreen() {
@@ -46,22 +49,7 @@ export default function HomeScreen() {
   const createRoom = useRoomStore((s) => s.createRoom);
   const initGame = useGameStore((s) => s.initGame);
 
-  // Floating music notes animation
-  const floatAnim = useSharedValue(0);
-  useEffect(() => {
-    floatAnim.value = withRepeat(
-      withSequence(
-        withTiming(-8, { duration: 2000 }),
-        withTiming(8, { duration: 2000 })
-      ),
-      -1,
-      true
-    );
-  }, []);
 
-  const floatStyle = useAnimatedStyle(() => ({
-    transform: [{ translateY: floatAnim.value }],
-  }));
 
   const handleCreateRoom = () => {
     createRoom(
@@ -82,8 +70,8 @@ export default function HomeScreen() {
   const handleShareInvite = async () => {
     try {
       await Share.share({
-        message: `Join my SongGuess room! Code: RHXQ42\n\nDownload: songguess://join/RHXQ42`,
-        title: 'Join my SongGuess game!',
+        message: `Join my Interlude room! Code: RHXQ42\n\nPlay now: interlude://join/RHXQ42`,
+        title: 'Join my Interlude game!',
       });
     } catch (e) {
       // Silently handle
@@ -92,9 +80,11 @@ export default function HomeScreen() {
 
   return (
     <View style={[styles.screen, { paddingTop: insets.top }]}>
-      {/* Background gradient accents */}
-      <View style={styles.bgAccent1} />
-      <View style={styles.bgAccent2} />
+      {/* Spotify-aesthetic album collage background */}
+      <AlbumCollageBackground />
+
+      {/* Animated floating particles */}
+      <FloatingParticles />
 
       <ScrollView
         style={styles.scroll}
@@ -110,48 +100,11 @@ export default function HomeScreen() {
           style={styles.header}
         >
           <View style={styles.logoRow}>
-            <Animated.View style={floatStyle}>
-              <MaterialCommunityIcons
-                name="music-note"
-                size={28}
-                color={Colors.primary}
-              />
-            </Animated.View>
-            <Text style={styles.logoText}>SongGuess</Text>
+            <Text style={styles.logoText}>INTERLUDE.</Text>
           </View>
           <Text style={styles.subtitle}>
-            Challenge a friend. Guess the track.
+            Choose an artist. Challenge your friend. Guess the track.
           </Text>
-        </Animated.View>
-
-        {/* Hero Section */}
-        <Animated.View entering={FadeInDown.delay(200).duration(600)}>
-          <GlassCard borderRadius={28} padding={0}>
-            <View style={styles.heroInner}>
-              {/* Large visual element */}
-              <View style={styles.heroVisual}>
-                <LinearGradient
-                  colors={['rgba(255,255,255,0.05)', 'rgba(255,255,255,0)']}
-                  style={styles.heroGradient}
-                />
-                <View style={styles.heroIconContainer}>
-                  <View style={styles.heroIconRing}>
-                    <MaterialCommunityIcons
-                      name="headphones"
-                      size={48}
-                      color={Colors.primary}
-                    />
-                  </View>
-                </View>
-                <Text style={styles.heroTitle}>1v1 Song Battle</Text>
-                <Text style={styles.heroDesc}>
-                  Pick an artist, invite a friend, and see who really knows
-                  the music. 10 rounds, 3-second clips, fastest correct
-                  answer wins.
-                </Text>
-              </View>
-            </View>
-          </GlassCard>
         </Animated.View>
 
         {/* Create Room */}
@@ -305,6 +258,86 @@ export default function HomeScreen() {
   );
 }
 
+// ─── Floating particle accents ────────────────────────────────────────
+const PARTICLE_COUNT = 8;
+
+function FloatingParticles() {
+  const particles = React.useMemo(() => {
+    return Array.from({ length: PARTICLE_COUNT }, (_, i) => ({
+      id: i,
+      x: (i * 47 + 13) % SCREEN_WIDTH,
+      y: (i * 89 + 31) % (SCREEN_HEIGHT * 0.6),
+      size: 2 + (i % 3) * 1.5,
+      delay: i * 400,
+      duration: 3000 + (i % 4) * 1000,
+      color: i % 3 === 0
+        ? 'rgba(168, 85, 247, 0.4)'
+        : i % 3 === 1
+          ? 'rgba(236, 72, 153, 0.3)'
+          : 'rgba(59, 130, 246, 0.3)',
+    }));
+  }, []);
+
+  return (
+    <View style={StyleSheet.absoluteFill} pointerEvents="none">
+      {particles.map((p) => (
+        <FloatingDot key={p.id} config={p} />
+      ))}
+    </View>
+  );
+}
+
+function FloatingDot({ config }: { config: any }) {
+  const anim = useSharedValue(0);
+
+  useEffect(() => {
+    anim.value = withDelay(
+      config.delay,
+      withRepeat(
+        withSequence(
+          withTiming(1, {
+            duration: config.duration,
+            easing: Easing.inOut(Easing.sin),
+          }),
+          withTiming(0, {
+            duration: config.duration,
+            easing: Easing.inOut(Easing.sin),
+          })
+        ),
+        -1,
+        true
+      )
+    );
+  }, []);
+
+  const dotStyle = useAnimatedStyle(() => {
+    const translateY = interpolate(anim.value, [0, 1], [0, -20]);
+    const opacity = interpolate(anim.value, [0, 0.5, 1], [0.2, 0.8, 0.2]);
+
+    return {
+      transform: [{ translateY }],
+      opacity,
+    };
+  });
+
+  return (
+    <Animated.View
+      style={[
+        {
+          position: 'absolute',
+          left: config.x,
+          top: config.y,
+          width: config.size,
+          height: config.size,
+          borderRadius: config.size / 2,
+          backgroundColor: config.color,
+        },
+        dotStyle,
+      ]}
+    />
+  );
+}
+
 const POPULAR_ARTISTS = [
   {
     name: 'Radiohead',
@@ -331,25 +364,7 @@ const POPULAR_ARTISTS = [
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: Colors.background,
-  },
-  bgAccent1: {
-    position: 'absolute',
-    top: -100,
-    right: -60,
-    width: 250,
-    height: 250,
-    borderRadius: 125,
-    backgroundColor: 'rgba(255, 255, 255, 0.02)',
-  },
-  bgAccent2: {
-    position: 'absolute',
-    bottom: 100,
-    left: -80,
-    width: 200,
-    height: 200,
-    borderRadius: 100,
-    backgroundColor: 'rgba(255, 255, 255, 0.015)',
+    backgroundColor: '#0a0613',
   },
   scroll: {
     flex: 1,
@@ -369,58 +384,29 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.xs,
   },
   logoText: {
-    fontFamily: 'Inter-Bold',
-    fontSize: 28,
-    color: Colors.primary,
-    letterSpacing: -1,
+    fontFamily: 'Antonio',
+    fontSize: 48,
+    color: '#ffffff',
+    letterSpacing: 4,
+    textTransform: 'uppercase',
+    lineHeight: 52,
+    textShadowColor: 'rgba(0, 0, 0, 0.9)',
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 8,
   },
   subtitle: {
-    fontFamily: 'Inter',
-    fontSize: 16,
-    color: Colors.textSubtle,
+    fontFamily: 'Inter-Bold',
+    fontSize: 15,
+    color: '#ffffff',
     marginTop: 4,
+    letterSpacing: 0.3,
+    opacity: 0.95,
+    textShadowColor: 'rgba(0, 0, 0, 0.95)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 6,
   },
 
-  // Hero
-  heroInner: {
-    padding: Spacing.containerPadding,
-  },
-  heroVisual: {
-    alignItems: 'center',
-    paddingVertical: Spacing.lg,
-  },
-  heroGradient: {
-    ...StyleSheet.absoluteFillObject,
-    borderRadius: 28,
-  },
-  heroIconContainer: {
-    marginBottom: Spacing.md,
-  },
-  heroIconRing: {
-    width: 88,
-    height: 88,
-    borderRadius: 44,
-    backgroundColor: 'rgba(255, 255, 255, 0.06)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  heroTitle: {
-    fontFamily: 'Inter-Bold',
-    fontSize: 22,
-    color: Colors.primary,
-    textAlign: 'center',
-    marginBottom: Spacing.sm,
-  },
-  heroDesc: {
-    fontFamily: 'Inter',
-    fontSize: 14,
-    color: Colors.textSubtle,
-    textAlign: 'center',
-    lineHeight: 22,
-    paddingHorizontal: Spacing.md,
-  },
+
 
   // Action Cards
   actionCard: {

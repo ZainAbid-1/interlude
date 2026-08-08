@@ -1,12 +1,12 @@
 {
   "expo": {
-    "name": "SongGuess",
-    "slug": "songguess",
+    "name": "interlude.",
+    "slug": "interlude",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
-    "scheme": "songguess",
+    "scheme": "interlude",
     "ios": {
       "supportsTablet": true,
       "backgroundColor": "#0a0a0a"
