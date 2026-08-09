@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -9,6 +9,7 @@ import {
   Image,
   Share,
   TextInput,
+  Alert,
 } from 'react-native';
 import { router } from 'expo-router';
 import Animated, {
@@ -29,12 +30,10 @@ import * as Clipboard from 'expo-clipboard';
 import { GlassCard } from '../../components/GlassCard';
 import { AlbumCollageBackground } from '../../components/AlbumCollageBackground';
 import { RoomCodeInput } from '../../components/RoomCodeInput';
-import {
-  getTopArtists,
-  searchArtists,
-  FALLBACK_TOP_ARTISTS,
-} from '../../services/spotify';
+import { searchArtists, FALLBACK_TOP_ARTISTS } from '../../services/spotify';
 import type { SpotifyArtist } from '../../services/spotify';
+import { supabase, isSupabaseConfigured } from '../../lib/supabase';
+import { useAuthStore } from '../../store/authStore';
 import { useRoomStore } from '../../store/roomStore';
 import { useGameStore } from '../../store/gameStore';
 import { Colors, Spacing, BorderRadius } from '../../constants/theme';
@@ -51,12 +50,10 @@ export default function HomeScreen() {
   const [showCreate, setShowCreate] = useState(false);
   const [copied, setCopied] = useState(false);
 
-  const [topArtists, setTopArtists] = useState<SpotifyArtist[]>(
-    FALLBACK_TOP_ARTISTS
-  );
   const [chosenArtist, setChosenArtist] = useState<SpotifyArtist>(
     FALLBACK_TOP_ARTISTS[0]
   );
+  const [searchActive, setSearchActive] = useState(false);
   const [artistQuery, setArtistQuery] = useState('');
   const [artistMatches, setArtistMatches] = useState<SpotifyArtist[]>([]);
   const [searching, setSearching] = useState(false);
@@ -66,17 +63,29 @@ export default function HomeScreen() {
   const joinRoom = useRoomStore((s) => s.joinRoom);
   const initGame = useGameStore((s) => s.initGame);
 
-  // Load live Spotify top artists on mount
+  // Dev-only smoke check: confirms the client reaches Supabase.
   useEffect(() => {
-    let mounted = true;
-    getTopArtists(6)
-      .then((artists) => {
-        if (mounted) setTopArtists(artists);
-      })
-      .catch(() => {});
-    return () => {
-      mounted = false;
-    };
+    if (!__DEV__) return;
+    if (!isSupabaseConfigured || !supabase) {
+      console.warn(
+        '[supabase] not configured — set EXPO_PUBLIC_SUPABASE_URL and EXPO_PUBLIC_SUPABASE_ANON_KEY in .env'
+      );
+      return;
+    }
+    (async () => {
+      try {
+        const { error } = await supabase
+          .from('track_pools')
+          .select('id', { count: 'exact', head: true });
+        console.log(
+          error
+            ? `[supabase] error: ${error.message}`
+            : '[supabase] connected OK'
+        );
+      } catch (e) {
+        console.log('[supabase] request failed:', (e as Error)?.message ?? e);
+      }
+    })();
   }, []);
 
   // Debounced artist search
@@ -122,13 +131,10 @@ export default function HomeScreen() {
 
   const selectArtist = (artist: SpotifyArtist) => {
     setChosenArtist(artist);
+    setSearchActive(false);
+    setArtistQuery('');
+    setArtistMatches([]);
     createRoom(artist.name, artist.image);
-  };
-
-  const handleCreateArtist = (artist: { name: string; image: string }) => {
-    createRoom(artist.name, artist.image);
-    initGame();
-    router.push('/game');
   };
 
   const handleJoinRoom = () => {
@@ -181,19 +187,12 @@ export default function HomeScreen() {
         >
           <View style={styles.logoRow}>
             <Text style={styles.logoText}>INTERLUDE.</Text>
+            <View style={styles.logoSpacer} />
+            <AuthPill />
           </View>
           <Text style={styles.subtitle}>
             Choose an artist. Challenge your friend. Guess the track.
           </Text>
-        </Animated.View>
-
-        {/* Popular Artists (on top), cards move slowly */}
-        <Animated.View entering={FadeInDown.delay(200).duration(600)}>
-          <Text style={styles.sectionTitle}>Popular Artists</Text>
-          <AutoScrollingArtists
-            artists={topArtists}
-            onSelectArtist={handleCreateArtist}
-          />
         </Animated.View>
 
         {/* Create Room */}
@@ -236,70 +235,78 @@ export default function HomeScreen() {
                 Search to pick the artist for your room
               </Text>
 
-              <View style={styles.searchRow}>
-                <Ionicons name="search" size={18} color={Colors.textSubtle} />
-                <TextInput
-                  style={styles.searchInput}
-                  value={artistQuery}
-                  onChangeText={setArtistQuery}
-                  placeholder="Search an artist..."
-                  placeholderTextColor={Colors.textSubtle}
-                  autoCapitalize="words"
-                  autoCorrect={false}
-                  returnKeyType="search"
-                />
-              </View>
-
-              {artistQuery.trim().length > 0 ? (
-                artistMatches.length > 0 ? (
-                  <View style={styles.resultList}>
-                    {artistMatches.map((artist) => (
-                      <Pressable
-                        key={artist.id}
-                        onPress={() => selectArtist(artist)}
-                        style={[
-                          styles.resultRow,
-                          chosenArtist.id === artist.id && styles.resultRowActive,
-                        ]}
-                      >
-                        {artist.image ? (
-                          <Image
-                            source={{ uri: artist.image }}
-                            style={styles.resultImage}
-                          />
-                        ) : (
-                          <View style={styles.resultImagePlaceholder}>
-                            <MaterialCommunityIcons
-                              name="music-note"
-                              size={18}
-                              color={WARM_GOLD}
-                            />
-                          </View>
-                        )}
-                        <Text style={styles.resultName} numberOfLines={1}>
-                          {artist.name}
-                        </Text>
-                        <Ionicons
-                          name={
-                            chosenArtist.id === artist.id
-                              ? 'checkmark-circle'
-                              : 'chevron-forward'
-                          }
-                          size={18}
-                          color={
-                            chosenArtist.id === artist.id
-                              ? WARM_GOLD
-                              : Colors.textSubtle
-                          }
-                        />
-                      </Pressable>
-                    ))}
+              {searchActive ? (
+                <>
+                  <View style={styles.searchRow}>
+                    <Ionicons
+                      name="search"
+                      size={18}
+                      color={Colors.textSubtle}
+                    />
+                    <TextInput
+                      style={styles.searchInput}
+                      value={artistQuery}
+                      onChangeText={setArtistQuery}
+                      placeholder="Search an artist..."
+                      placeholderTextColor={Colors.textSubtle}
+                      autoCapitalize="words"
+                      autoCorrect={false}
+                      returnKeyType="search"
+                    />
                   </View>
-                ) : (
-                  <Text style={styles.searchStatus}>
-                    {searching ? 'Searching...' : 'No artists found'}
-                  </Text>
-                )
+
+                  {artistQuery.trim().length > 0 &&
+                    (artistMatches.length > 0 ? (
+                      <View style={styles.resultList}>
+                        {artistMatches.map((artist) => (
+                          <Pressable
+                            key={artist.id}
+                            onPress={() => selectArtist(artist)}
+                            style={[
+                              styles.resultRow,
+                              chosenArtist.id === artist.id &&
+                                styles.resultRowActive,
+                            ]}
+                          >
+                            {artist.image ? (
+                              <Image
+                                source={{ uri: artist.image }}
+                                style={styles.resultImage}
+                              />
+                            ) : (
+                              <View style={styles.resultImagePlaceholder}>
+                                <MaterialCommunityIcons
+                                  name="music-note"
+                                  size={18}
+                                  color={WARM_GOLD}
+                                />
+                              </View>
+                            )}
+                            <Text style={styles.resultName} numberOfLines={1}>
+                              {artist.name}
+                            </Text>
+                            <Ionicons
+                              name={
+                                chosenArtist.id === artist.id
+                                  ? 'checkmark-circle'
+                                  : 'chevron-forward'
+                              }
+                              size={18}
+                              color={
+                                chosenArtist.id === artist.id
+                                  ? WARM_GOLD
+                                  : Colors.textSubtle
+                              }
+                            />
+                          </Pressable>
+                        ))}
+                      </View>
+                    ) : (
+                      <Text style={styles.searchStatus}>
+                        {searching ? 'Searching...' : 'No artists found'}
+                      </Text>
+                    ))}
+                </>
               ) : (
                 <View style={styles.chosenRow}>
                   <Image
@@ -307,11 +314,23 @@ export default function HomeScreen() {
                     style={styles.chosenImage}
                   />
                   <View style={styles.chosenText}>
-                    <Text style={styles.chosenLabel}>Selected artist</Text>
-                    <Text style={styles.chosenName} numberOfLines={1}>
+                    <Text style={styles.chosenLabel}>Playing with</Text>
+                    <Text style={styles.chosenName} numberOfLines={2}>
                       {chosenArtist.name}
                     </Text>
                   </View>
+                  <Pressable
+                    onPress={() => setSearchActive(true)}
+                    hitSlop={8}
+                    style={styles.changeButton}
+                  >
+                    <Ionicons
+                      name="create-outline"
+                      size={14}
+                      color={WARM_GOLD}
+                    />
+                    <Text style={styles.changeButtonText}>Change</Text>
+                  </Pressable>
                 </View>
               )}
 
@@ -500,87 +519,60 @@ function FloatingDot({ config }: { config: any }) {
   );
 }
 
-// ─── Auto-scrolling popular artists ───────────────────────────────────
-interface ArtistItem {
-  id: string;
-  name: string;
-  image: string;
-}
+// ─── Google sign-in pill ─────────────────────────────────────────────
+function AuthPill() {
+  const session = useAuthStore((s) => s.session);
+  const profile = useAuthStore((s) => s.profile);
+  const isGuest = useAuthStore((s) => s.isGuest);
+  const loading = useAuthStore((s) => s.loading);
+  const signOut = useAuthStore((s) => s.signOut);
 
-function AutoScrollingArtists({
-  artists,
-  onSelectArtist,
-}: {
-  artists: ArtistItem[];
-  onSelectArtist: (artist: ArtistItem) => void;
-}) {
-  const scrollRef = useRef<ScrollView>(null);
-  const viewportWidthRef = useRef(0);
-  const pausedRef = useRef(false);
-  const [maxScroll, setMaxScroll] = useState(0);
+  const handlePress = async () => {
+    if (session || isGuest) {
+      Alert.alert(
+        profile?.display_name ?? 'Interlude Player',
+        isGuest ? 'Signed in as Guest' : 'Signed in with Google',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Sign out',
+            style: 'destructive',
+            onPress: async () => {
+              await signOut();
+              router.replace('/login');
+            },
+          },
+        ]
+      );
+      return;
+    }
+    router.replace('/login');
+  };
 
-  useEffect(() => {
-    if (maxScroll <= 0) return;
+  if (loading) return null;
 
-    let x = maxScroll;
-    let dir = -1;
-    const step = 0.45;
-    const id = setInterval(() => {
-      if (pausedRef.current) return;
-      x += dir * step;
-      if (x >= maxScroll) {
-        x = maxScroll;
-        dir = -1;
-      } else if (x <= 0) {
-        x = 0;
-        dir = 1;
-      }
-      scrollRef.current?.scrollTo({ x, y: 0, animated: false });
-    }, 16);
-
-    return () => clearInterval(id);
-  }, [maxScroll]);
+  if (profile) {
+    return (
+      <Pressable onPress={handlePress} hitSlop={8} style={styles.authPill}>
+        {profile.avatar_url ? (
+          <Image source={{ uri: profile.avatar_url }} style={styles.authAvatar} />
+        ) : (
+          <View style={styles.authAvatar}>
+            <Ionicons name="person" size={16} color={WARM_GOLD} />
+          </View>
+        )}
+        <Text style={styles.authName} numberOfLines={1}>
+          {profile.display_name ?? 'You'}
+        </Text>
+      </Pressable>
+    );
+  }
 
   return (
-    <View
-      style={styles.artistsWrap}
-      onLayout={(e) => {
-        viewportWidthRef.current = e.nativeEvent.layout.width;
-      }}
-    >
-      <ScrollView
-        ref={scrollRef}
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.artistsScroll}
-        onContentSizeChange={(w) => {
-          const max = Math.max(0, w - viewportWidthRef.current);
-          setMaxScroll(max);
-        }}
-        onScrollBeginDrag={() => {
-          pausedRef.current = true;
-        }}
-        onScrollEndDrag={() => {
-          pausedRef.current = false;
-        }}
-      >
-        {artists.map((artist) => (
-          <Pressable
-            key={artist.id}
-            onPress={() => onSelectArtist(artist)}
-          >
-            <View style={styles.artistCard}>
-              <Image source={{ uri: artist.image }} style={styles.artistImage} />
-              <View style={styles.artistOverlay}>
-                <Text style={styles.artistName} numberOfLines={1}>
-                  {artist.name}
-                </Text>
-              </View>
-            </View>
-          </Pressable>
-        ))}
-      </ScrollView>
-</View>
+    <Pressable onPress={handlePress} hitSlop={8} style={styles.authPill}>
+      <Ionicons name="logo-google" size={15} color={WARM_GOLD} />
+      <Text style={styles.authName}>Sign in</Text>
+    </Pressable>
   );
 }
 
@@ -605,6 +597,35 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: Spacing.sm,
     marginBottom: Spacing.xs,
+  },
+  logoSpacer: {
+    flex: 1,
+  },
+  authPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    height: 34,
+    maxWidth: 150,
+    backgroundColor: 'rgba(30, 14, 5, 0.7)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 190, 110, 0.28)',
+    borderRadius: BorderRadius.full,
+    paddingHorizontal: Spacing.sm + 2,
+  },
+  authAvatar: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255, 190, 110, 0.14)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  authName: {
+    fontFamily: 'Inter-Bold',
+    fontSize: 13,
+    color: Colors.primary,
+    flexShrink: 1,
   },
   logoText: {
     fontFamily: 'Antonio',
@@ -663,52 +684,6 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter',
     fontSize: 13,
     color: Colors.textMuted,
-  },
-
-  // Popular Artists
-  sectionTitle: {
-    fontFamily: 'Inter-Bold',
-    fontSize: 18,
-    color: WARM_GOLD,
-    marginTop: Spacing.sm,
-    marginBottom: Spacing.xs,
-  },
-  artistsWrap: {
-    overflow: 'hidden',
-  },
-  artistsScroll: {
-    gap: Spacing.stackGap,
-    paddingRight: Spacing.containerPadding,
-    marginTop: 0,
-  },
-  artistCard: {
-    width: 130,
-    height: 160,
-    borderRadius: BorderRadius.lg,
-    overflow: 'hidden',
-    backgroundColor: Colors.surfaceContainer,
-  },
-  artistImage: {
-    width: '100%',
-    height: '100%',
-    resizeMode: 'cover',
-  },
-  artistOverlay: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    padding: Spacing.sm,
-    paddingTop: 24,
-    backgroundColor: 'transparent',
-  },
-  artistName: {
-    fontFamily: 'Inter-Bold',
-    fontSize: 13,
-    color: Colors.primary,
-    textShadowColor: 'rgba(0,0,0,0.8)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 4,
   },
 
   // Create / Invite
@@ -788,35 +763,54 @@ const styles = StyleSheet.create({
   chosenRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Spacing.md,
+    gap: Spacing.sm,
     backgroundColor: 'rgba(255, 190, 110, 0.08)',
     borderRadius: BorderRadius.lg,
     borderWidth: 1,
     borderColor: 'rgba(255, 190, 110, 0.2)',
-    padding: Spacing.md,
+    paddingVertical: Spacing.sm,
+    paddingHorizontal: Spacing.sm,
     marginBottom: Spacing.md,
   },
   chosenImage: {
-    width: 46,
-    height: 46,
-    borderRadius: 23,
+    width: 54,
+    height: 54,
+    borderRadius: 27,
     backgroundColor: Colors.surfaceContainer,
   },
   chosenText: {
     flex: 1,
+    minWidth: 0,
+    paddingRight: Spacing.xs,
   },
   chosenLabel: {
     fontFamily: 'Inter',
-    fontSize: 12,
+    fontSize: 10,
     color: WARM_GOLD,
     textTransform: 'uppercase',
-    letterSpacing: 1,
+    letterSpacing: 1.2,
     marginBottom: 2,
   },
   chosenName: {
     fontFamily: 'Inter-Bold',
     fontSize: 16,
+    lineHeight: 21,
     color: Colors.primary,
+  },
+  changeButton: {
+    flexDirection: 'row',
+    alignSelf: 'center',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: 'rgba(255, 190, 110, 0.16)',
+    borderRadius: BorderRadius.full,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+  },
+  changeButtonText: {
+    fontFamily: 'Inter-Bold',
+    fontSize: 13,
+    color: WARM_GOLD_BRIGHT,
   },
   divider: {
     height: StyleSheet.hairlineWidth,

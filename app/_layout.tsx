@@ -16,6 +16,7 @@ import { LeagueGothic_400Regular } from '@expo-google-fonts/league-gothic';
 import * as SplashScreen from 'expo-splash-screen';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { Colors } from '../constants/theme';
+import { useAuthStore } from '../store/authStore';
 
 // Keep splash visible until fonts load
 SplashScreen.preventAutoHideAsync().catch(() => {});
@@ -29,6 +30,13 @@ export default function RootLayout() {
     Antonio: Antonio_700Bold,
     LeagueGothic: LeagueGothic_400Regular,
   });
+
+  // Restore Supabase auth session + subscribe to changes
+  const hydrate = useAuthStore((s) => s.hydrate);
+  useEffect(() => {
+    const unsubscribe = hydrate();
+    return unsubscribe;
+  }, [hydrate]);
 
   useEffect(() => {
     if (fontsLoaded) {
@@ -50,6 +58,8 @@ export default function RootLayout() {
           animation: 'slide_from_right',
         }}
       >
+        <Stack.Screen name="index" />
+        <Stack.Screen name="login" />
         <Stack.Screen name="(tabs)" />
         <Stack.Screen
           name="game"

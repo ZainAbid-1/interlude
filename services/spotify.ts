@@ -202,3 +202,180 @@ export const FALLBACK_TOP_ARTISTS: SpotifyArtist[] = [
     image: 'https://i.scdn.co/image/ab6761610000e5eb214f3cf1cbe7139c1ec26ffbb',
   },
 ];
+
+// ─── Track pool generation ───────────────────────────────────────────
+
+export interface TrackPoolItem {
+  spotifyTrackId: string;
+  trackName: string;
+  albumArtUrl: string;
+  previewUrl: string;
+  previewSource: 'itunes' | 'deezer';
+  clipStartMs: number;
+  durationMs: number;
+}
+
+interface TrackCandidate {
+  id: string;
+  name: string;
+  albumArtUrl: string;
+}
+
+interface ResolvedPreview {
+  url: string;
+  source: 'itunes' | 'deezer';
+  durationMs: number;
+}
+
+/**
+ * Collects candidate tracks for an artist (top tracks first, then
+ * album/single tracks), deduped by track id.
+ */
+async function collectCandidates(
+  token: string,
+  artistId: string,
+  cap = 40
+): Promise<TrackCandidate[]> {
+  const byId = new Map<string, TrackCandidate>();
+  const pushTracks = (items: any[]) => {
+    for (const t of items) {
+      if (byId.has(t.id)) continue;
+      if (byId.size >= cap) return;
+      byId.set(t.id, {
+        id: t.id,
+        name: t.name,
+        albumArtUrl: pickImage(t?.album?.images),
+      });
+    }
+  };
+
+  // 1. Artist top tracks
+  try {
+    const res = await fetch(
+      `${API_ENDPOINT}/artists/${artistId}/top-tracks?market=US`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+    if (res.ok) {
+      const data = await res.json();
+      pushTracks(data?.tracks ?? []);
+    }
+  } catch (e) {
+    // continue with album search
+  }
+
+  // 2. Albums + singles (up to the cap) to reach a deeper catalog
+  try {
+    const res = await fetch(
+      `${API_ENDPOINT}/artists/${artistId}/albums?include_groups=album,single&market=US&limit=50`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+    if (res.ok) {
+      const data = await res.json();
+      const albums: any[] = data?.items ?? [];
+      for (const album of albums) {
+        if (byId.size >= cap) break;
+        const tracksRes = await fetch(
+          `${API_ENDPOINT}/albums/${album.id}/tracks?market=US&limit=20`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        if (tracksRes.ok) {
+          const tracksData = await tracksRes.json();
+          pushTracks(tracksData?.items ?? []);
+        }
+      }
+    }
+  } catch (e) {
+    // best effort
+  }
+
+  return Array.from(byId.values()).slice(0, cap);
+}
+
+/**
+ * Resolves a free 3-second-playable preview for a track:
+ * iTunes Search API first, Deezer as fallback.
+ */
+async function resolvePreview(
+  artistName: string,
+  trackName: string
+): Promise<ResolvedPreview | null> {
+  // 1. iTunes
+  try {
+    const term = encodeURIComponent(`${artistName} ${trackName}`);
+    const res = await fetch(
+      `https://itunes.apple.com/search?term=${term}&entity=song&limit=1`
+    );
+    if (res.ok) {
+      const data = await res.json();
+      const result = data?.results?.[0];
+      if (result?.previewUrl) {
+        return {
+          url: result.previewUrl,
+          source: 'itunes',
+          durationMs: result.trackTimeMillis ?? 30000,
+        };
+      }
+    }
+  } catch (e) {
+    // fall through to Deezer
+  }
+
+  // 2. Deezer
+  try {
+    const q = encodeURIComponent(`artist:"${artistName}" track:"${trackName}"`);
+    const res = await fetch(`https://api.deezer.com/search?q=${q}&limit=1`);
+    if (res.ok) {
+      const data = await res.json();
+      const result = data?.data?.[0];
+      if (result?.preview) {
+        return { url: result.preview, source: 'deezer', durationMs: 30000 };
+      }
+    }
+  } catch (e) {
+    // no preview available
+  }
+
+  return null;
+}
+
+/**
+ * Builds a room track pool for an artist: up to `limit` tracks that
+ * have a resolvable free preview. Returns [] if credentials are missing
+ * or the catalog has no playable previews (host should pick another
+ * artist or more candidates should be pulled).
+ */
+export async function getArtistTrackPool(
+  artistId: string,
+  artistName: string,
+  limit = 10
+): Promise<TrackPoolItem[]> {
+  if (!hasCredentials) return [];
+
+  try {
+    const token = await getToken();
+    const candidates = await collectCandidates(token, artistId, limit * 4);
+    const pool: TrackPoolItem[] = [];
+
+    for (const track of candidates) {
+      if (pool.length >= limit) break;
+      const preview = await resolvePreview(artistName, track.name);
+      if (!preview) continue;
+      pool.push({
+        spotifyTrackId: track.id,
+        trackName: track.name,
+        albumArtUrl: track.albumArtUrl,
+        previewUrl: preview.url,
+        previewSource: preview.source,
+        durationMs: preview.durationMs,
+        clipStartMs: Math.min(
+          8000,
+          Math.max(0, preview.durationMs - 4000)
+        ),
+      });
+    }
+
+    return pool;
+  } catch (e) {
+    return [];
+  }
+}
