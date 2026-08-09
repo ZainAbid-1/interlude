@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -7,75 +7,155 @@ import {
   StyleSheet,
   Dimensions,
   Image,
-  TextInput,
   Share,
-  Platform,
+  TextInput,
 } from 'react-native';
 import { router } from 'expo-router';
-import { LinearGradient } from 'expo-linear-gradient';
-import { BlurView } from 'expo-blur';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
-  withSpring,
   withRepeat,
   withSequence,
   withTiming,
   withDelay,
-  FadeIn,
   FadeInDown,
-  FadeInUp,
-  SlideInUp,
   Easing,
   interpolate,
 } from 'react-native-reanimated';
 import { MaterialCommunityIcons, Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import * as Clipboard from 'expo-clipboard';
 
 import { GlassCard } from '../../components/GlassCard';
 import { AlbumCollageBackground } from '../../components/AlbumCollageBackground';
 import { RoomCodeInput } from '../../components/RoomCodeInput';
+import {
+  getTopArtists,
+  searchArtists,
+  FALLBACK_TOP_ARTISTS,
+} from '../../services/spotify';
+import type { SpotifyArtist } from '../../services/spotify';
 import { useRoomStore } from '../../store/roomStore';
 import { useGameStore } from '../../store/gameStore';
-import { Colors, Spacing, BorderRadius, Typography } from '../../constants/theme';
+import { Colors, Spacing, BorderRadius } from '../../constants/theme';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
-const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
+
+const WARM_GOLD = '#e8a95c';
+const WARM_GOLD_BRIGHT = '#ffc98a';
 
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
   const [joinCode, setJoinCode] = useState('');
   const [showJoinInput, setShowJoinInput] = useState(false);
+  const [showCreate, setShowCreate] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  const [topArtists, setTopArtists] = useState<SpotifyArtist[]>(
+    FALLBACK_TOP_ARTISTS
+  );
+  const [chosenArtist, setChosenArtist] = useState<SpotifyArtist>(
+    FALLBACK_TOP_ARTISTS[0]
+  );
+  const [artistQuery, setArtistQuery] = useState('');
+  const [artistMatches, setArtistMatches] = useState<SpotifyArtist[]>([]);
+  const [searching, setSearching] = useState(false);
+
+  const roomCode = useRoomStore((s) => s.roomCode);
   const createRoom = useRoomStore((s) => s.createRoom);
+  const joinRoom = useRoomStore((s) => s.joinRoom);
   const initGame = useGameStore((s) => s.initGame);
 
+  // Load live Spotify top artists on mount
+  useEffect(() => {
+    let mounted = true;
+    getTopArtists(6)
+      .then((artists) => {
+        if (mounted) setTopArtists(artists);
+      })
+      .catch(() => {});
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
+  // Debounced artist search
+  useEffect(() => {
+    const query = artistQuery.trim();
+    if (!query) {
+      setArtistMatches([]);
+      setSearching(false);
+      return;
+    }
+    let cancelled = false;
+    setSearching(true);
+    const timer = setTimeout(async () => {
+      const results = await searchArtists(query, 6);
+      if (!cancelled) {
+        setArtistMatches(results);
+        setSearching(false);
+      }
+    }, 450);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [artistQuery]);
 
-  const handleCreateRoom = () => {
-    createRoom(
-      'Radiohead',
-      'https://i.scdn.co/image/ab6761610000e5eba03696716c9ee605006047fd'
-    );
+  const ensureRoom = () => {
+    if (!roomCode) {
+      createRoom(chosenArtist.name, chosenArtist.image);
+    }
+  };
+
+  const toggleCreate = () => {
+    const next = !showCreate;
+    if (next) ensureRoom();
+    setShowCreate(next);
+  };
+
+  const startGame = () => {
+    createRoom(chosenArtist.name, chosenArtist.image);
+    initGame();
+    router.push('/game');
+  };
+
+  const selectArtist = (artist: SpotifyArtist) => {
+    setChosenArtist(artist);
+    createRoom(artist.name, artist.image);
+  };
+
+  const handleCreateArtist = (artist: { name: string; image: string }) => {
+    createRoom(artist.name, artist.image);
     initGame();
     router.push('/game');
   };
 
   const handleJoinRoom = () => {
     if (joinCode.length === 6) {
+      joinRoom(joinCode);
       initGame();
       router.push('/game');
     }
   };
 
   const handleShareInvite = async () => {
+    ensureRoom();
     try {
       await Share.share({
-        message: `Join my Interlude room! Code: RHXQ42\n\nPlay now: interlude://join/RHXQ42`,
+        message: `Join my Interlude room! Code: ${roomCode}\n\nPlay now: interlude://join/${roomCode}`,
         title: 'Join my Interlude game!',
       });
     } catch (e) {
       // Silently handle
     }
+  };
+
+  const handleCopyLink = async () => {
+    ensureRoom();
+    await Clipboard.setStringAsync(`interlude://join/${roomCode}`);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1600);
   };
 
   return (
@@ -107,9 +187,18 @@ export default function HomeScreen() {
           </Text>
         </Animated.View>
 
+        {/* Popular Artists (on top), cards move slowly */}
+        <Animated.View entering={FadeInDown.delay(200).duration(600)}>
+          <Text style={styles.sectionTitle}>Popular Artists</Text>
+          <AutoScrollingArtists
+            artists={topArtists}
+            onSelectArtist={handleCreateArtist}
+          />
+        </Animated.View>
+
         {/* Create Room */}
         <Animated.View entering={FadeInDown.delay(350).duration(600)}>
-          <AnimatedPressable onPress={handleCreateRoom}>
+          <Pressable onPress={toggleCreate}>
             <GlassCard borderRadius={24} padding={0}>
               <View style={styles.actionCard}>
                 <View style={styles.actionCardLeft}>
@@ -123,19 +212,157 @@ export default function HomeScreen() {
                   <View style={styles.actionTextContainer}>
                     <Text style={styles.actionTitle}>Create a Room</Text>
                     <Text style={styles.actionDesc}>
-                      Pick an artist and invite a friend
+                      Host a room and share the invite link
                     </Text>
                   </View>
                 </View>
                 <Ionicons
-                  name="chevron-forward"
+                  name={showCreate ? 'chevron-up' : 'chevron-forward'}
                   size={20}
                   color={Colors.textSubtle}
                 />
               </View>
             </GlassCard>
-          </AnimatedPressable>
+          </Pressable>
         </Animated.View>
+
+        {/* Create Room Content (expandable) */}
+        {showCreate && (
+          <Animated.View entering={FadeInDown.duration(300)}>
+            <GlassCard borderRadius={24}>
+              {/* Choose artist */}
+              <Text style={styles.chooseLabel}>Choose your artist</Text>
+              <Text style={styles.chooseHint}>
+                Search to pick the artist for your room
+              </Text>
+
+              <View style={styles.searchRow}>
+                <Ionicons name="search" size={18} color={Colors.textSubtle} />
+                <TextInput
+                  style={styles.searchInput}
+                  value={artistQuery}
+                  onChangeText={setArtistQuery}
+                  placeholder="Search an artist..."
+                  placeholderTextColor={Colors.textSubtle}
+                  autoCapitalize="words"
+                  autoCorrect={false}
+                  returnKeyType="search"
+                />
+              </View>
+
+              {artistQuery.trim().length > 0 ? (
+                artistMatches.length > 0 ? (
+                  <View style={styles.resultList}>
+                    {artistMatches.map((artist) => (
+                      <Pressable
+                        key={artist.id}
+                        onPress={() => selectArtist(artist)}
+                        style={[
+                          styles.resultRow,
+                          chosenArtist.id === artist.id && styles.resultRowActive,
+                        ]}
+                      >
+                        {artist.image ? (
+                          <Image
+                            source={{ uri: artist.image }}
+                            style={styles.resultImage}
+                          />
+                        ) : (
+                          <View style={styles.resultImagePlaceholder}>
+                            <MaterialCommunityIcons
+                              name="music-note"
+                              size={18}
+                              color={WARM_GOLD}
+                            />
+                          </View>
+                        )}
+                        <Text style={styles.resultName} numberOfLines={1}>
+                          {artist.name}
+                        </Text>
+                        <Ionicons
+                          name={
+                            chosenArtist.id === artist.id
+                              ? 'checkmark-circle'
+                              : 'chevron-forward'
+                          }
+                          size={18}
+                          color={
+                            chosenArtist.id === artist.id
+                              ? WARM_GOLD
+                              : Colors.textSubtle
+                          }
+                        />
+                      </Pressable>
+                    ))}
+                  </View>
+                ) : (
+                  <Text style={styles.searchStatus}>
+                    {searching ? 'Searching...' : 'No artists found'}
+                  </Text>
+                )
+              ) : (
+                <View style={styles.chosenRow}>
+                  <Image
+                    source={{ uri: chosenArtist.image }}
+                    style={styles.chosenImage}
+                  />
+                  <View style={styles.chosenText}>
+                    <Text style={styles.chosenLabel}>Selected artist</Text>
+                    <Text style={styles.chosenName} numberOfLines={1}>
+                      {chosenArtist.name}
+                    </Text>
+                  </View>
+                </View>
+              )}
+
+              <View style={styles.divider} />
+
+              {/* Invite */}
+              <View style={styles.inviteHeaderRow}>
+                <View style={styles.inviteIconRing}>
+                  <Ionicons name="link-outline" size={18} color={WARM_GOLD} />
+                </View>
+                <View style={styles.inviteHeaderText}>
+                  <Text style={styles.inviteLabel}>Invite a friend</Text>
+                  <Text style={styles.inviteHint}>
+                    Share your room link to start playing
+                  </Text>
+                </View>
+              </View>
+
+              <View style={styles.linkRow}>
+                <Text style={styles.linkText} numberOfLines={1}>
+                  interlude://join/{roomCode}
+                </Text>
+                <Pressable
+                  onPress={handleCopyLink}
+                  hitSlop={8}
+                  style={styles.copyButton}
+                >
+                  <Ionicons
+                    name={copied ? 'checkmark' : 'copy-outline'}
+                    size={18}
+                    color={copied ? WARM_GOLD : Colors.primary}
+                  />
+                </Pressable>
+              </View>
+
+              <View style={styles.inviteButtonsRow}>
+                <Pressable
+                  onPress={handleShareInvite}
+                  style={styles.shareButton}
+                >
+                  <Ionicons name="share-outline" size={16} color="#241505" />
+                  <Text style={styles.shareButtonText}>Share Invite</Text>
+                </Pressable>
+                <Pressable onPress={startGame} style={styles.startButton}>
+                  <Text style={styles.startButtonText}>Start Game</Text>
+                  <Ionicons name="arrow-forward" size={16} color="#241505" />
+                </Pressable>
+              </View>
+            </GlassCard>
+          </Animated.View>
+        )}
 
         {/* Join Room */}
         <Animated.View entering={FadeInDown.delay(450).duration(600)}>
@@ -188,71 +415,6 @@ export default function HomeScreen() {
             </GlassCard>
           </Animated.View>
         )}
-
-        {/* Invite Section */}
-        <Animated.View entering={FadeInDown.delay(550).duration(600)}>
-          <Pressable onPress={handleShareInvite}>
-            <GlassCard borderRadius={24} padding={0}>
-              <View style={styles.inviteCard}>
-                <View style={styles.inviteLeft}>
-                  <View style={styles.inviteIconRing}>
-                    <Ionicons
-                      name="share-outline"
-                      size={22}
-                      color={Colors.primary}
-                    />
-                  </View>
-                  <View>
-                    <Text style={styles.inviteTitle}>Invite a Friend</Text>
-                    <Text style={styles.inviteDesc}>
-                      Share a link to start playing
-                    </Text>
-                  </View>
-                </View>
-                <View style={styles.inviteBadge}>
-                  <Text style={styles.inviteBadgeText}>Share</Text>
-                </View>
-              </View>
-            </GlassCard>
-          </Pressable>
-        </Animated.View>
-
-        {/* Quick Match Suggestion */}
-        <Animated.View entering={FadeInDown.delay(650).duration(600)}>
-          <Text style={styles.sectionTitle}>Popular Artists</Text>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.artistsScroll}
-          >
-            {POPULAR_ARTISTS.map((artist, index) => (
-              <Animated.View
-                key={artist.name}
-                entering={FadeInDown.delay(700 + index * 80).duration(400)}
-              >
-                <Pressable
-                  onPress={() => {
-                    createRoom(artist.name, artist.image);
-                    initGame();
-                    router.push('/game');
-                  }}
-                >
-                  <View style={styles.artistCard}>
-                    <Image
-                      source={{ uri: artist.image }}
-                      style={styles.artistImage}
-                    />
-                    <View style={styles.artistOverlay}>
-                      <Text style={styles.artistName} numberOfLines={1}>
-                        {artist.name}
-                      </Text>
-                    </View>
-                  </View>
-                </Pressable>
-              </Animated.View>
-            ))}
-          </ScrollView>
-        </Animated.View>
       </ScrollView>
     </View>
   );
@@ -271,10 +433,10 @@ function FloatingParticles() {
       delay: i * 400,
       duration: 3000 + (i % 4) * 1000,
       color: i % 3 === 0
-        ? 'rgba(168, 85, 247, 0.4)'
+        ? 'rgba(255, 186, 102, 0.35)'
         : i % 3 === 1
-          ? 'rgba(236, 72, 153, 0.3)'
-          : 'rgba(59, 130, 246, 0.3)',
+          ? 'rgba(255, 140, 60, 0.3)'
+          : 'rgba(255, 206, 132, 0.3)',
     }));
   }, []);
 
@@ -338,33 +500,94 @@ function FloatingDot({ config }: { config: any }) {
   );
 }
 
-const POPULAR_ARTISTS = [
-  {
-    name: 'Radiohead',
-    image: 'https://i.scdn.co/image/ab6761610000e5eba03696716c9ee605006047fd',
-  },
-  {
-    name: 'Arctic Monkeys',
-    image: 'https://i.scdn.co/image/ab6761610000e5eb7da39dea0a72f581535571da',
-  },
-  {
-    name: 'Daft Punk',
-    image: 'https://i.scdn.co/image/ab6761610000e5eba7bfd7835b5c1eee0c95fa6e',
-  },
-  {
-    name: 'Tame Impala',
-    image: 'https://i.scdn.co/image/ab6761610000e5ebbe3e82e7b6abcdd0e29a5fbf',
-  },
-  {
-    name: 'The Weeknd',
-    image: 'https://i.scdn.co/image/ab6761610000e5eb214f3cf1cbe7139c1e26ffbb',
-  },
-];
+// ─── Auto-scrolling popular artists ───────────────────────────────────
+interface ArtistItem {
+  id: string;
+  name: string;
+  image: string;
+}
+
+function AutoScrollingArtists({
+  artists,
+  onSelectArtist,
+}: {
+  artists: ArtistItem[];
+  onSelectArtist: (artist: ArtistItem) => void;
+}) {
+  const scrollRef = useRef<ScrollView>(null);
+  const viewportWidthRef = useRef(0);
+  const pausedRef = useRef(false);
+  const [maxScroll, setMaxScroll] = useState(0);
+
+  useEffect(() => {
+    if (maxScroll <= 0) return;
+
+    let x = maxScroll;
+    let dir = -1;
+    const step = 0.45;
+    const id = setInterval(() => {
+      if (pausedRef.current) return;
+      x += dir * step;
+      if (x >= maxScroll) {
+        x = maxScroll;
+        dir = -1;
+      } else if (x <= 0) {
+        x = 0;
+        dir = 1;
+      }
+      scrollRef.current?.scrollTo({ x, y: 0, animated: false });
+    }, 16);
+
+    return () => clearInterval(id);
+  }, [maxScroll]);
+
+  return (
+    <View
+      style={styles.artistsWrap}
+      onLayout={(e) => {
+        viewportWidthRef.current = e.nativeEvent.layout.width;
+      }}
+    >
+      <ScrollView
+        ref={scrollRef}
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.artistsScroll}
+        onContentSizeChange={(w) => {
+          const max = Math.max(0, w - viewportWidthRef.current);
+          setMaxScroll(max);
+        }}
+        onScrollBeginDrag={() => {
+          pausedRef.current = true;
+        }}
+        onScrollEndDrag={() => {
+          pausedRef.current = false;
+        }}
+      >
+        {artists.map((artist) => (
+          <Pressable
+            key={artist.id}
+            onPress={() => onSelectArtist(artist)}
+          >
+            <View style={styles.artistCard}>
+              <Image source={{ uri: artist.image }} style={styles.artistImage} />
+              <View style={styles.artistOverlay}>
+                <Text style={styles.artistName} numberOfLines={1}>
+                  {artist.name}
+                </Text>
+              </View>
+            </View>
+          </Pressable>
+        ))}
+      </ScrollView>
+</View>
+  );
+}
 
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: '#0a0613',
+    backgroundColor: '#140b04',
   },
   scroll: {
     flex: 1,
@@ -390,7 +613,7 @@ const styles = StyleSheet.create({
     letterSpacing: 4,
     textTransform: 'uppercase',
     lineHeight: 52,
-    textShadowColor: 'rgba(0, 0, 0, 0.9)',
+    textShadowColor: 'rgba(30, 10, 2, 0.95)',
     textShadowOffset: { width: 0, height: 2 },
     textShadowRadius: 8,
   },
@@ -401,12 +624,10 @@ const styles = StyleSheet.create({
     marginTop: 4,
     letterSpacing: 0.3,
     opacity: 0.95,
-    textShadowColor: 'rgba(0, 0, 0, 0.95)',
+    textShadowColor: 'rgba(30, 10, 2, 0.95)',
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 6,
   },
-
-
 
   // Action Cards
   actionCard: {
@@ -444,90 +665,21 @@ const styles = StyleSheet.create({
     color: Colors.textMuted,
   },
 
-  // Join
-  joinLabel: {
-    fontFamily: 'Inter',
-    fontSize: 13,
-    color: Colors.textSubtle,
-    marginBottom: Spacing.md,
-    textAlign: 'center',
-    textTransform: 'uppercase',
-    letterSpacing: 2,
-  },
-  joinInputContainer: {
-    marginBottom: Spacing.lg,
-  },
-  joinButton: {
-    backgroundColor: Colors.primary,
-    borderRadius: BorderRadius.lg,
-    paddingVertical: 16,
-    alignItems: 'center',
-  },
-  joinButtonDisabled: {
-    opacity: 0.3,
-  },
-  joinButtonText: {
-    fontFamily: 'Inter-Bold',
-    fontSize: 16,
-    color: Colors.background,
-  },
-
-  // Invite
-  inviteCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: Spacing.lg,
-  },
-  inviteLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.md,
-  },
-  inviteIconRing: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.15)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  inviteTitle: {
-    fontFamily: 'Inter-Bold',
-    fontSize: 15,
-    color: Colors.primary,
-    marginBottom: 2,
-  },
-  inviteDesc: {
-    fontFamily: 'Inter',
-    fontSize: 13,
-    color: Colors.textMuted,
-  },
-  inviteBadge: {
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    borderRadius: BorderRadius.full,
-    paddingHorizontal: 14,
-    paddingVertical: 6,
-  },
-  inviteBadgeText: {
-    fontFamily: 'Inter',
-    fontSize: 12,
-    color: Colors.primary,
-    fontWeight: '600',
-  },
-
   // Popular Artists
   sectionTitle: {
     fontFamily: 'Inter-Bold',
     fontSize: 18,
-    color: Colors.primary,
+    color: WARM_GOLD,
     marginTop: Spacing.sm,
     marginBottom: Spacing.xs,
+  },
+  artistsWrap: {
+    overflow: 'hidden',
   },
   artistsScroll: {
     gap: Spacing.stackGap,
     paddingRight: Spacing.containerPadding,
+    marginTop: 0,
   },
   artistCard: {
     width: 130,
@@ -557,5 +709,230 @@ const styles = StyleSheet.create({
     textShadowColor: 'rgba(0,0,0,0.8)',
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 4,
+  },
+
+  // Create / Invite
+  chooseLabel: {
+    fontFamily: 'Inter-Bold',
+    fontSize: 15,
+    color: Colors.primary,
+  },
+  chooseHint: {
+    fontFamily: 'Inter',
+    fontSize: 13,
+    color: Colors.textMuted,
+    marginTop: 2,
+    marginBottom: Spacing.md,
+  },
+  searchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    borderRadius: BorderRadius.md,
+    borderWidth: 1,
+    borderColor: Colors.glassBorder,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: 10,
+    marginBottom: Spacing.md,
+  },
+  searchInput: {
+    flex: 1,
+    fontFamily: 'Inter',
+    fontSize: 15,
+    color: Colors.primary,
+    padding: 0,
+  },
+  resultList: {
+    gap: Spacing.sm,
+    marginBottom: Spacing.md,
+  },
+  resultRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.md,
+    paddingVertical: 6,
+    paddingHorizontal: Spacing.sm,
+    borderRadius: BorderRadius.md,
+  },
+  resultRowActive: {
+    backgroundColor: 'rgba(255, 190, 110, 0.1)',
+  },
+  resultImage: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: Colors.surfaceContainer,
+  },
+  resultImagePlaceholder: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Colors.surfaceContainer,
+  },
+  resultName: {
+    flex: 1,
+    fontFamily: 'Inter-Bold',
+    fontSize: 15,
+    color: Colors.primary,
+  },
+  searchStatus: {
+    fontFamily: 'Inter',
+    fontSize: 13,
+    color: Colors.textSubtle,
+    textAlign: 'center',
+    marginBottom: Spacing.md,
+  },
+  chosenRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.md,
+    backgroundColor: 'rgba(255, 190, 110, 0.08)',
+    borderRadius: BorderRadius.lg,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 190, 110, 0.2)',
+    padding: Spacing.md,
+    marginBottom: Spacing.md,
+  },
+  chosenImage: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    backgroundColor: Colors.surfaceContainer,
+  },
+  chosenText: {
+    flex: 1,
+  },
+  chosenLabel: {
+    fontFamily: 'Inter',
+    fontSize: 12,
+    color: WARM_GOLD,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+    marginBottom: 2,
+  },
+  chosenName: {
+    fontFamily: 'Inter-Bold',
+    fontSize: 16,
+    color: Colors.primary,
+  },
+  divider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    marginBottom: Spacing.lg,
+  },
+  inviteHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.md,
+    marginBottom: Spacing.md,
+  },
+  inviteIconRing: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 190, 110, 0.3)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  inviteHeaderText: {
+    flex: 1,
+  },
+  inviteLabel: {
+    fontFamily: 'Inter-Bold',
+    fontSize: 15,
+    color: Colors.primary,
+    marginBottom: 2,
+  },
+  inviteHint: {
+    fontFamily: 'Inter',
+    fontSize: 13,
+    color: Colors.textMuted,
+  },
+  linkRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 190, 110, 0.08)',
+    borderRadius: BorderRadius.md,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 190, 110, 0.2)',
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    marginBottom: Spacing.lg,
+  },
+  linkText: {
+    flex: 1,
+    fontFamily: 'Inter',
+    fontSize: 14,
+    color: WARM_GOLD_BRIGHT,
+    letterSpacing: 0.3,
+  },
+  copyButton: {
+    paddingLeft: Spacing.sm,
+  },
+  inviteButtonsRow: {
+    flexDirection: 'row',
+    gap: Spacing.sm,
+  },
+  shareButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.xs,
+    backgroundColor: 'rgba(255, 190, 110, 0.18)',
+    borderRadius: BorderRadius.lg,
+    paddingVertical: 14,
+  },
+  shareButtonText: {
+    fontFamily: 'Inter-Bold',
+    fontSize: 15,
+    color: WARM_GOLD_BRIGHT,
+  },
+  startButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.xs,
+    backgroundColor: WARM_GOLD,
+    borderRadius: BorderRadius.lg,
+    paddingVertical: 14,
+  },
+  startButtonText: {
+    fontFamily: 'Inter-Bold',
+    fontSize: 15,
+    color: '#241505',
+  },
+
+  // Join
+  joinLabel: {
+    fontFamily: 'Inter',
+    fontSize: 13,
+    color: Colors.textSubtle,
+    marginBottom: Spacing.md,
+    textAlign: 'center',
+    textTransform: 'uppercase',
+    letterSpacing: 2,
+  },
+  joinInputContainer: {
+    marginBottom: Spacing.lg,
+  },
+  joinButton: {
+    backgroundColor: Colors.primary,
+    borderRadius: BorderRadius.lg,
+    paddingVertical: 16,
+    alignItems: 'center',
+  },
+  joinButtonDisabled: {
+    opacity: 0.3,
+  },
+  joinButtonText: {
+    fontFamily: 'Inter-Bold',
+    fontSize: 16,
+    color: Colors.background,
   },
 });

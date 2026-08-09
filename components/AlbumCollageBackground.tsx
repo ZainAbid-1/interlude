@@ -184,9 +184,9 @@ export function AlbumCollageBackground() {
 
   return (
     <View style={styles.container} pointerEvents="none">
-      {/* Base dark gradient */}
+      {/* Base warm dark gradient */}
       <LinearGradient
-        colors={['#0d0613', '#0a0a14', '#0e0818', '#080810']}
+        colors={['#1a0d05', '#120a06', '#200f05', '#0e0703']}
         locations={[0, 0.3, 0.6, 1]}
         style={StyleSheet.absoluteFill}
       />
@@ -199,18 +199,18 @@ export function AlbumCollageBackground() {
       </View>
 
       {/* Color mood overlays */}
-      <View style={styles.purpleGlow1} />
-      <View style={styles.purpleGlow2} />
-      <View style={styles.pinkGlow} />
-      <View style={styles.blueGlow} />
+      <View style={styles.goldGlow1} />
+      <View style={styles.amberGlow} />
+      <View style={styles.emberGlow} />
+      <View style={styles.bronzeGlow} />
 
       {/* Dark vignette overlays for readability */}
       <LinearGradient
         colors={[
-          'rgba(10, 6, 18, 0.3)',
-          'rgba(10, 6, 18, 0.6)',
-          'rgba(10, 6, 18, 0.85)',
-          'rgba(10, 6, 18, 0.95)',
+          'rgba(14, 7, 3, 0.35)',
+          'rgba(16, 8, 3, 0.6)',
+          'rgba(12, 6, 2, 0.85)',
+          'rgba(8, 4, 2, 0.97)',
         ]}
         locations={[0, 0.25, 0.6, 1]}
         style={StyleSheet.absoluteFill}
@@ -218,7 +218,7 @@ export function AlbumCollageBackground() {
 
       {/* Top fade for status bar */}
       <LinearGradient
-        colors={['rgba(10, 6, 18, 0.95)', 'rgba(10, 6, 18, 0.4)', 'transparent']}
+        colors={['rgba(10, 5, 2, 0.96)', 'rgba(14, 7, 3, 0.4)', 'transparent']}
         locations={[0, 0.4, 1]}
         style={styles.topFade}
       />
@@ -239,7 +239,7 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     overflow: 'hidden',
     // Subtle glow shadow
-    shadowColor: '#a855f7',
+    shadowColor: '#e8a24b',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 12,
@@ -281,41 +281,41 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255, 255, 255, 0.6)',
     borderRadius: 1,
   },
-  purpleGlow1: {
+  goldGlow1: {
     position: 'absolute',
     top: '15%',
     left: '-10%',
     width: 300,
     height: 300,
     borderRadius: 150,
-    backgroundColor: 'rgba(139, 92, 246, 0.12)',
+    backgroundColor: 'rgba(255, 176, 92, 0.1)',
   },
-  purpleGlow2: {
+  amberGlow: {
     position: 'absolute',
     bottom: '25%',
     right: '-15%',
     width: 350,
     height: 350,
     borderRadius: 175,
-    backgroundColor: 'rgba(168, 85, 247, 0.08)',
+    backgroundColor: 'rgba(224, 124, 48, 0.07)',
   },
-  pinkGlow: {
+  emberGlow: {
     position: 'absolute',
     top: '40%',
     right: '10%',
     width: 200,
     height: 200,
     borderRadius: 100,
-    backgroundColor: 'rgba(236, 72, 153, 0.07)',
+    backgroundColor: 'rgba(255, 196, 120, 0.06)',
   },
-  blueGlow: {
+  bronzeGlow: {
     position: 'absolute',
     bottom: '10%',
     left: '20%',
     width: 250,
     height: 250,
     borderRadius: 125,
-    backgroundColor: 'rgba(59, 130, 246, 0.05)',
+    backgroundColor: 'rgba(164, 92, 40, 0.06)',
   },
   topFade: {
     position: 'absolute',
