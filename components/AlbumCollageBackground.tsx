@@ -52,45 +52,30 @@ interface CardConfig {
 }
 
 function generateCards(): CardConfig[] {
-  // Deterministic "random" positions for a beautiful collage layout
   const cards: CardConfig[] = [
     // Row 1 - top area
     { x: -30, y: -40, rotation: -12, scale: 0.85, albumIndex: 0, animDelay: 0, driftX: 3, driftY: 4, driftDuration: 4000 },
-    { x: 80, y: -20, rotation: 8, scale: 0.75, albumIndex: 1, animDelay: 200, driftX: -2, driftY: 3, driftDuration: 5000 },
     { x: 200, y: -50, rotation: -5, scale: 0.9, albumIndex: 2, animDelay: 400, driftX: 4, driftY: -2, driftDuration: 3500 },
-    { x: 310, y: -30, rotation: 15, scale: 0.7, albumIndex: 3, animDelay: 100, driftX: -3, driftY: 5, driftDuration: 4500 },
+    { x: 340, y: -30, rotation: 15, scale: 0.7, albumIndex: 3, animDelay: 100, driftX: -3, driftY: 5, driftDuration: 4500 },
 
     // Row 2
-    { x: -20, y: 90, rotation: 6, scale: 0.78, albumIndex: 4, animDelay: 300, driftX: 2, driftY: -3, driftDuration: 5500 },
-    { x: 110, y: 110, rotation: -10, scale: 0.88, albumIndex: 5, animDelay: 500, driftX: -4, driftY: 2, driftDuration: 4200 },
-    { x: 240, y: 80, rotation: 12, scale: 0.82, albumIndex: 6, animDelay: 150, driftX: 3, driftY: -4, driftDuration: 3800 },
-    { x: 350, y: 100, rotation: -7, scale: 0.7, albumIndex: 7, animDelay: 600, driftX: -2, driftY: 3, driftDuration: 4800 },
+    { x: -20, y: 100, rotation: 6, scale: 0.78, albumIndex: 4, animDelay: 300, driftX: 2, driftY: -3, driftDuration: 5500 },
+    { x: 120, y: 110, rotation: -10, scale: 0.88, albumIndex: 5, animDelay: 500, driftX: -4, driftY: 2, driftDuration: 4200 },
+    { x: 280, y: 80, rotation: 12, scale: 0.82, albumIndex: 6, animDelay: 150, driftX: 3, driftY: -4, driftDuration: 3800 },
 
     // Row 3
-    { x: -40, y: 220, rotation: -15, scale: 0.92, albumIndex: 8, animDelay: 250, driftX: 4, driftY: 2, driftDuration: 3200 },
-    { x: 70, y: 250, rotation: 5, scale: 0.72, albumIndex: 9, animDelay: 350, driftX: -3, driftY: -2, driftDuration: 5200 },
-    { x: 190, y: 210, rotation: -8, scale: 0.85, albumIndex: 10, animDelay: 700, driftX: 2, driftY: 4, driftDuration: 4600 },
-    { x: 320, y: 240, rotation: 10, scale: 0.78, albumIndex: 11, animDelay: 450, driftX: -4, driftY: -3, driftDuration: 3600 },
+    { x: -40, y: 240, rotation: -15, scale: 0.92, albumIndex: 8, animDelay: 250, driftX: 4, driftY: 2, driftDuration: 3200 },
+    { x: 100, y: 260, rotation: 5, scale: 0.72, albumIndex: 9, animDelay: 350, driftX: -3, driftY: -2, driftDuration: 5200 },
+    { x: 270, y: 220, rotation: -8, scale: 0.85, albumIndex: 10, animDelay: 700, driftX: 2, driftY: 4, driftDuration: 4600 },
 
     // Row 4
-    { x: -10, y: 360, rotation: 9, scale: 0.8, albumIndex: 12, animDelay: 550, driftX: 3, driftY: -2, driftDuration: 4400 },
-    { x: 130, y: 380, rotation: -13, scale: 0.9, albumIndex: 13, animDelay: 100, driftX: -2, driftY: 4, driftDuration: 5100 },
-    { x: 260, y: 350, rotation: 7, scale: 0.75, albumIndex: 14, animDelay: 650, driftX: 4, driftY: -3, driftDuration: 3400 },
-    { x: 370, y: 370, rotation: -11, scale: 0.83, albumIndex: 15, animDelay: 200, driftX: -3, driftY: 2, driftDuration: 4900 },
+    { x: -10, y: 400, rotation: 9, scale: 0.8, albumIndex: 12, animDelay: 550, driftX: 3, driftY: -2, driftDuration: 4400 },
+    { x: 180, y: 380, rotation: -13, scale: 0.9, albumIndex: 13, animDelay: 100, driftX: -2, driftY: 4, driftDuration: 5100 },
+    { x: 320, y: 410, rotation: -11, scale: 0.83, albumIndex: 15, animDelay: 200, driftX: -3, driftY: 2, driftDuration: 4900 },
 
-    // Row 5 - bottom area
-    { x: -30, y: 490, rotation: -6, scale: 0.88, albumIndex: 16, animDelay: 400, driftX: 2, driftY: 3, driftDuration: 5300 },
-    { x: 100, y: 520, rotation: 14, scale: 0.76, albumIndex: 17, animDelay: 300, driftX: -4, driftY: -2, driftDuration: 3700 },
-    { x: 230, y: 480, rotation: -9, scale: 0.82, albumIndex: 18, animDelay: 750, driftX: 3, driftY: 4, driftDuration: 4300 },
-    { x: 350, y: 510, rotation: 6, scale: 0.7, albumIndex: 19, animDelay: 500, driftX: -2, driftY: -3, driftDuration: 5000 },
-
-    // Extra cards for density
-    { x: 40, y: 620, rotation: 11, scale: 0.85, albumIndex: 0, animDelay: 200, driftX: 3, driftY: 2, driftDuration: 4100 },
-    { x: 170, y: 650, rotation: -8, scale: 0.78, albumIndex: 3, animDelay: 400, driftX: -3, driftY: 4, driftDuration: 3900 },
-    { x: 300, y: 630, rotation: 13, scale: 0.9, albumIndex: 6, animDelay: 600, driftX: 2, driftY: -2, driftDuration: 4700 },
-    { x: -20, y: 750, rotation: -10, scale: 0.73, albumIndex: 9, animDelay: 350, driftX: -4, driftY: 3, driftDuration: 5400 },
-    { x: 120, y: 780, rotation: 7, scale: 0.86, albumIndex: 12, animDelay: 550, driftX: 3, driftY: -4, driftDuration: 3300 },
-    { x: 260, y: 760, rotation: -14, scale: 0.8, albumIndex: 15, animDelay: 150, driftX: -2, driftY: 2, driftDuration: 4500 },
+    // Row 5
+    { x: -30, y: 540, rotation: -6, scale: 0.88, albumIndex: 16, animDelay: 400, driftX: 2, driftY: 3, driftDuration: 5300 },
+    { x: 230, y: 530, rotation: -9, scale: 0.82, albumIndex: 18, animDelay: 750, driftX: 3, driftY: 4, driftDuration: 4300 },
   ];
 
   return cards;
@@ -100,10 +85,8 @@ const CARD_SIZE = 120;
 
 function FloatingCard({ config }: { config: CardConfig }) {
   const drift = useSharedValue(0);
-  const pulse = useSharedValue(0);
 
   useEffect(() => {
-    // Gentle floating drift
     drift.value = withDelay(
       config.animDelay,
       withRepeat(
@@ -121,32 +104,18 @@ function FloatingCard({ config }: { config: CardConfig }) {
         true
       )
     );
-
-    // Very subtle scale pulse
-    pulse.value = withDelay(
-      config.animDelay + 500,
-      withRepeat(
-        withSequence(
-          withTiming(1, { duration: 3000, easing: Easing.inOut(Easing.ease) }),
-          withTiming(0, { duration: 3000, easing: Easing.inOut(Easing.ease) })
-        ),
-        -1,
-        true
-      )
-    );
   }, []);
 
   const animatedStyle = useAnimatedStyle(() => {
     const translateX = interpolate(drift.value, [0, 1], [0, config.driftX]);
     const translateY = interpolate(drift.value, [0, 1], [0, config.driftY]);
-    const scaleOffset = interpolate(pulse.value, [0, 1], [0, 0.03]);
 
     return {
       transform: [
         { translateX },
         { translateY },
         { rotate: `${config.rotation}deg` },
-        { scale: config.scale + scaleOffset },
+        { scale: config.scale },
       ],
     };
   });

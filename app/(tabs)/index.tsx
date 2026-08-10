@@ -50,10 +50,8 @@ export default function HomeScreen() {
   const [showCreate, setShowCreate] = useState(false);
   const [copied, setCopied] = useState(false);
 
-  const [chosenArtist, setChosenArtist] = useState<SpotifyArtist>(
-    FALLBACK_TOP_ARTISTS[0]
-  );
-  const [searchActive, setSearchActive] = useState(false);
+  const [chosenArtist, setChosenArtist] = useState<SpotifyArtist | null>(null);
+  const [searchActive, setSearchActive] = useState(true);
   const [artistQuery, setArtistQuery] = useState('');
   const [artistMatches, setArtistMatches] = useState<SpotifyArtist[]>([]);
   const [searching, setSearching] = useState(false);
@@ -112,7 +110,7 @@ export default function HomeScreen() {
   }, [artistQuery]);
 
   const ensureRoom = () => {
-    if (!roomCode) {
+    if (!roomCode && chosenArtist) {
       createRoom(chosenArtist.name, chosenArtist.image);
     }
   };
@@ -124,6 +122,7 @@ export default function HomeScreen() {
   };
 
   const startGame = () => {
+    if (!chosenArtist) return;
     createRoom(chosenArtist.name, chosenArtist.image);
     initGame();
     router.push('/game');
@@ -168,9 +167,6 @@ export default function HomeScreen() {
     <View style={[styles.screen, { paddingTop: insets.top }]}>
       {/* Spotify-aesthetic album collage background */}
       <AlbumCollageBackground />
-
-      {/* Animated floating particles */}
-      <FloatingParticles />
 
       <ScrollView
         style={styles.scroll}
@@ -265,7 +261,7 @@ export default function HomeScreen() {
                             onPress={() => selectArtist(artist)}
                             style={[
                               styles.resultRow,
-                              chosenArtist.id === artist.id &&
+                              chosenArtist?.id === artist.id &&
                                 styles.resultRowActive,
                             ]}
                           >
@@ -288,13 +284,13 @@ export default function HomeScreen() {
                             </Text>
                             <Ionicons
                               name={
-                                chosenArtist.id === artist.id
+                                chosenArtist?.id === artist.id
                                   ? 'checkmark-circle'
                                   : 'chevron-forward'
                               }
                               size={18}
                               color={
-                                chosenArtist.id === artist.id
+                                chosenArtist?.id === artist.id
                                   ? WARM_GOLD
                                   : Colors.textSubtle
                               }
@@ -308,7 +304,7 @@ export default function HomeScreen() {
                       </Text>
                     ))}
                 </>
-              ) : (
+              ) : chosenArtist ? (
                 <View style={styles.chosenRow}>
                   <Image
                     source={{ uri: chosenArtist.image }}
@@ -333,6 +329,20 @@ export default function HomeScreen() {
                     <Text style={styles.changeButtonText}>Change</Text>
                   </Pressable>
                 </View>
+              ) : (
+                <Pressable
+                  onPress={() => setSearchActive(true)}
+                  style={styles.noArtistRow}
+                >
+                  <View style={styles.noArtistIcon}>
+                    <MaterialCommunityIcons name="music-note-plus" size={22} color={WARM_GOLD} />
+                  </View>
+                  <View style={styles.chosenText}>
+                    <Text style={styles.chosenLabel}>No artist selected</Text>
+                    <Text style={styles.noArtistHint}>Tap to search and pick an artist</Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={18} color={WARM_GOLD} />
+                </Pressable>
               )}
 
               <View style={styles.divider} />
@@ -375,7 +385,11 @@ export default function HomeScreen() {
                   <Ionicons name="share-outline" size={16} color="#241505" />
                   <Text style={styles.shareButtonText}>Share Invite</Text>
                 </Pressable>
-                <Pressable onPress={startGame} style={styles.startButton}>
+                <Pressable
+                  onPress={startGame}
+                  style={[styles.startButton, !chosenArtist && styles.startButtonDisabled]}
+                  disabled={!chosenArtist}
+                >
                   <Text style={styles.startButtonText}>Start Game</Text>
                   <Ionicons name="arrow-forward" size={16} color="#241505" />
                 </Pressable>
@@ -802,6 +816,33 @@ const styles = StyleSheet.create({
     lineHeight: 21,
     color: Colors.primary,
   },
+  noArtistRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    backgroundColor: 'rgba(255, 190, 110, 0.06)',
+    borderRadius: BorderRadius.lg,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 190, 110, 0.18)',
+    borderStyle: 'dashed',
+    paddingVertical: Spacing.sm,
+    paddingHorizontal: Spacing.sm,
+    marginBottom: Spacing.md,
+  },
+  noArtistIcon: {
+    width: 54,
+    height: 54,
+    borderRadius: 27,
+    backgroundColor: 'rgba(255, 190, 110, 0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  noArtistHint: {
+    fontFamily: 'Inter',
+    fontSize: 13,
+    color: Colors.textMuted,
+    marginTop: 2,
+  },
   changeButton: {
     flexDirection: 'row',
     alignSelf: 'center',
@@ -905,6 +946,9 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter-Bold',
     fontSize: 15,
     color: '#241505',
+  },
+  startButtonDisabled: {
+    opacity: 0.35,
   },
 
   // Join
