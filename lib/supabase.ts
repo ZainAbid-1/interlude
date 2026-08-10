@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createClient } from '@supabase/supabase-js';
+import { Platform } from 'react-native';
 
 const SUPABASE_URL = (process.env.EXPO_PUBLIC_SUPABASE_URL ?? '').trim();
 const SUPABASE_ANON_KEY = (process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '').trim();
@@ -16,7 +17,9 @@ export const supabase =
           storage: AsyncStorage as any,
           autoRefreshToken: true,
           persistSession: true,
-          detectSessionInUrl: false,
+          // On web: detect OAuth tokens from the URL hash after redirect.
+          // On native: keep false — Expo's Metro bundler URL should not be parsed.
+          detectSessionInUrl: Platform.OS === 'web',
         },
       })
     : null;

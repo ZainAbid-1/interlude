@@ -186,8 +186,9 @@ export default function HomeScreen() {
           style={styles.header}
         >
           <View style={styles.logoRow}>
-            <Text style={styles.logoText}>INTERLUDE.</Text>
-            <View style={styles.logoSpacer} />
+            <Text style={styles.logoText} numberOfLines={1}>
+              INTERLUDE.
+            </Text>
             <AuthPill />
           </View>
           <Text style={styles.subtitle}>
@@ -561,7 +562,7 @@ function AuthPill() {
             <Ionicons name="person" size={16} color={WARM_GOLD} />
           </View>
         )}
-        <Text style={styles.authName} numberOfLines={1}>
+        <Text style={styles.authName} numberOfLines={1} ellipsizeMode="tail">
           {profile.display_name ?? 'You'}
         </Text>
       </Pressable>
@@ -595,48 +596,52 @@ const styles = StyleSheet.create({
   logoRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Spacing.sm,
+    justifyContent: 'space-between',
     marginBottom: Spacing.xs,
-  },
-  logoSpacer: {
-    flex: 1,
+    width: '100%',
   },
   authPill: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    height: 34,
-    maxWidth: 150,
+    height: 32,
+    maxWidth: 140,
     backgroundColor: 'rgba(30, 14, 5, 0.7)',
     borderWidth: 1,
     borderColor: 'rgba(255, 190, 110, 0.28)',
     borderRadius: BorderRadius.full,
-    paddingHorizontal: Spacing.sm + 2,
+    paddingHorizontal: 10,
+    marginLeft: 8,
   },
   authAvatar: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
     backgroundColor: 'rgba(255, 190, 110, 0.14)',
     alignItems: 'center',
     justifyContent: 'center',
+    overflow: 'hidden',
   },
   authName: {
     fontFamily: 'Inter-Bold',
-    fontSize: 13,
+    fontSize: 12,
+    lineHeight: 15,
     color: Colors.primary,
     flexShrink: 1,
+    includeFontPadding: false,
+    textAlignVertical: 'center',
   },
   logoText: {
     fontFamily: 'Antonio',
     fontSize: 48,
     color: '#ffffff',
-    letterSpacing: 4,
+    letterSpacing: 2,
     textTransform: 'uppercase',
     lineHeight: 52,
     textShadowColor: 'rgba(30, 10, 2, 0.95)',
     textShadowOffset: { width: 0, height: 2 },
     textShadowRadius: 8,
+    flexShrink: 1,
   },
   subtitle: {
     fontFamily: 'Inter-Bold',

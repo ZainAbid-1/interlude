@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "interlude.",
+    "name": "interlude",
     "slug": "interlude",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -18,7 +18,8 @@
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
-      "backgroundColor": "#0a0a0a"
+      "backgroundColor": "#0a0a0a",
+      "package": "com.zainabid_12.interlude"
     },
     "web": {
       "favicon": "./assets/favicon.png",
@@ -28,6 +29,12 @@
       "expo-router",
       "expo-font",
       "expo-web-browser"
-    ]
+    ],
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "f0d28e7f-c3a6-4557-8bd2-0fb77023a5e9"
+      }
+    }
   }
 }

@@ -3,6 +3,7 @@ import type { Session, User } from '@supabase/supabase-js';
 import * as WebBrowser from 'expo-web-browser';
 import * as AuthSession from 'expo-auth-session';
 import * as QueryParams from 'expo-auth-session/build/QueryParams';
+import { Platform } from 'react-native';
 import { supabase } from '../lib/supabase';
 
 export interface UserProfile {
@@ -83,10 +84,30 @@ export const useAuthStore = create<AuthState>((set) => ({
     if (!supabase) return { error: 'Supabase is not configured' };
 
     try {
+      // ── WEB ──────────────────────────────────────────────────────────────────
+      // On web, let Supabase drive the full redirect flow.
+      // openAuthSessionAsync is native-only; using it on web breaks the OAuth
+      // state cookie because the page navigates away and back, losing the cookie.
+      if (Platform.OS === 'web') {
+        const { error } = await supabase.auth.signInWithOAuth({
+          provider: 'google',
+          options: {
+            // Redirect back to the /callback route in the running dev server
+            redirectTo: window.location.origin + '/callback',
+          },
+        });
+        // signInWithOAuth on web automatically navigates the browser; no return value needed.
+        if (error) return { error: error.message };
+        return { error: null };
+      }
+
+      // ── NATIVE (Expo Go / dev build) ──────────────────────────────────────
+      // Do NOT pass { scheme } here — in Expo Go the scheme is exp://, not interlude://.
+      // makeRedirectUri() without a scheme override will generate the correct exp:// URL.
       WebBrowser.maybeCompleteAuthSession();
-      const redirectTo = AuthSession.makeRedirectUri();
+      const redirectTo = AuthSession.makeRedirectUri({ path: 'callback' });
       console.log('Redirect URI (Add this to Supabase URL Configuration):', redirectTo);
-      
+
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: { redirectTo },
@@ -99,7 +120,20 @@ export const useAuthStore = create<AuthState>((set) => ({
         return { error: 'Sign in was cancelled' };
       }
 
-      const { params } = QueryParams.getQueryParams(res.url);
+      // Parse tokens from redirect URL (may be in query params or hash fragment)
+      let params: Record<string, string> = {};
+      try {
+        const parsed = QueryParams.getQueryParams(res.url);
+        params = parsed.params || {};
+        if (res.url.includes('#')) {
+          const hashParams = new URLSearchParams(res.url.split('#')[1]);
+          if (hashParams.has('access_token')) params.access_token = hashParams.get('access_token') as string;
+          if (hashParams.has('refresh_token')) params.refresh_token = hashParams.get('refresh_token') as string;
+        }
+      } catch (e) {
+        console.warn('Failed to parse URL', e);
+      }
+
       const accessToken = params?.access_token;
       const refreshToken = params?.refresh_token;
       if (accessToken && refreshToken) {
@@ -116,6 +150,7 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
 
   signInAsGuest: () => {
+
     set({
       isGuest: true,
       profile: {

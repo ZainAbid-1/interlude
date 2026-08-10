@@ -17,7 +17,6 @@ import { Colors, Spacing, BorderRadius } from '../constants/theme';
 export default function LoginScreen() {
   const router = useRouter();
   const signInWithGoogle = useAuthStore((s) => s.signInWithGoogle);
-  const signInAsGuest = useAuthStore((s) => s.signInAsGuest);
   const [signingIn, setSigningIn] = useState(false);
 
   const handleGoogleSignIn = async () => {
@@ -26,20 +25,7 @@ export default function LoginScreen() {
       const { error } = await signInWithGoogle();
       setSigningIn(false);
       if (error) {
-        Alert.alert(
-          'Google Sign-In',
-          error,
-          [
-            { text: 'OK' },
-            {
-              text: 'Continue as Guest',
-              onPress: () => {
-                signInAsGuest();
-                router.replace('/(tabs)');
-              },
-            },
-          ]
-        );
+        Alert.alert('Google Sign-In', error, [{ text: 'OK' }]);
       } else {
         router.replace('/(tabs)');
       }
@@ -47,11 +33,6 @@ export default function LoginScreen() {
       setSigningIn(false);
       Alert.alert('Sign-in Error', (e as Error)?.message ?? 'An unexpected error occurred');
     }
-  };
-
-  const handleGuestSignIn = () => {
-    signInAsGuest();
-    router.replace('/(tabs)');
   };
 
   return (
@@ -62,7 +43,6 @@ export default function LoginScreen() {
         {/* Title in exact Antonio font in the middle of the screen */}
         <Animated.View entering={FadeInDown.delay(100).duration(800)} style={styles.titleContainer}>
           <Text style={styles.title}>INTERLUDE.</Text>
-          <Text style={styles.subtitle}>Music Trivia & Guessing Experience</Text>
         </Animated.View>
 
         {/* Google sign-in link / button */}
@@ -76,21 +56,18 @@ export default function LoginScreen() {
               signingIn && styles.buttonDisabled,
             ]}
           >
-            {signingIn ? (
-              <ActivityIndicator color="#ffffff" size="small" style={{ marginRight: 8 }} />
-            ) : (
-              <View style={styles.googleIconContainer}>
-                <Ionicons name="logo-google" size={20} color="#ffc98a" />
-              </View>
-            )}
-            <Text style={styles.googleButtonText}>
-              {signingIn ? 'Signing in...' : 'Sign in with Google'}
-            </Text>
-          </Pressable>
-
-          <Pressable onPress={handleGuestSignIn} style={styles.guestLink} hitSlop={12}>
-            <Text style={styles.guestText}>Continue as Guest</Text>
-            <Ionicons name="arrow-forward" size={14} color="rgba(255, 255, 255, 0.6)" />
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center' }}>
+              {signingIn ? (
+                <ActivityIndicator color="#ffffff" size="small" style={{ marginRight: 8 }} />
+              ) : (
+                <View style={styles.googleIconContainer}>
+                  <Ionicons name="logo-google" size={20} color="#ffc98a" />
+                </View>
+              )}
+              <Text style={styles.googleButtonText} numberOfLines={1}>
+                {signingIn ? 'Signing in...' : 'Sign in with Google'}
+              </Text>
+            </View>
           </Pressable>
         </Animated.View>
       </View>
@@ -125,18 +102,6 @@ const styles = StyleSheet.create({
     textShadowColor: 'rgba(232, 169, 92, 0.5)',
     textShadowOffset: { width: 0, height: 4 },
     textShadowRadius: 16,
-  },
-  subtitle: {
-    fontFamily: 'Inter-Bold',
-    fontSize: 13,
-    color: 'rgba(255, 255, 255, 0.75)',
-    letterSpacing: 1.5,
-    textTransform: 'uppercase',
-    marginTop: 10,
-    textAlign: 'center',
-    textShadowColor: 'rgba(0, 0, 0, 0.8)',
-    textShadowOffset: { width: 0, height: 2 },
-    textShadowRadius: 8,
   },
   actionContainer: {
     width: '100%',
@@ -181,18 +146,5 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#ffffff',
     letterSpacing: 0.3,
-  },
-  guestLink: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-  },
-  guestText: {
-    fontFamily: 'Inter',
-    fontSize: 14,
-    color: 'rgba(255, 255, 255, 0.65)',
-    textDecorationLine: 'underline',
   },
 });
