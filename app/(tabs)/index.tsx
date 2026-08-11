@@ -36,7 +36,6 @@ import type { SpotifyArtist } from '../../services/spotify';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase';
 import { useAuthStore } from '../../store/authStore';
 import { useRoomStore } from '../../store/roomStore';
-import { useGameStore } from '../../store/gameStore';
 import { Colors, Spacing, BorderRadius } from '../../constants/theme';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
@@ -58,13 +57,11 @@ export default function HomeScreen() {
   const [searching, setSearching] = useState(false);
 
   const roomCode = useRoomStore((s) => s.roomCode);
-  const roomId = useRoomStore((s) => s.roomId);
   const creatingRoom = useRoomStore((s) => s.creatingRoom);
   const joiningRoom = useRoomStore((s) => s.joiningRoom);
   const createRoom = useRoomStore((s) => s.createRoom);
   const joinRoom = useRoomStore((s) => s.joinRoom);
   const resetRoom = useRoomStore((s) => s.resetRoom);
-  const prepareMatch = useGameStore((s) => s.prepareMatch);
 
   // Dev-only smoke check: confirms the client reaches Supabase.
   useEffect(() => {
@@ -137,11 +134,8 @@ export default function HomeScreen() {
     if (!chosenArtist) return;
     const ok = await ensureRoom();
     if (!ok) return;
-    const match = await prepareMatch(roomId);
-    if (!match.ok) {
-      Alert.alert('Could not start match', match.error ?? 'Something went wrong');
-      return;
-    }
+    // Head into the game screen immediately: the host sees the "Waiting for
+    // opponent" screen, and the match auto-starts the second the guest joins.
     router.push('/game');
   };
 

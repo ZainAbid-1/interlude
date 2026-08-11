@@ -12,7 +12,7 @@ import {
 
 type RoundState = 'idle' | 'countdown' | 'playing' | 'answered' | 'result';
 
-export const ROUND_DURATION_MS = 10000; // 10 seconds per round
+export const ROUND_DURATION_MS = 8000; // 8 seconds per round (3s clip + 5s guess)
 export const COUNTDOWN_MS = 3000; // 3-second countdown before clip plays
 
 interface GameRound {
@@ -131,6 +131,10 @@ function clearAnswerPoll() {
 let roomChannel: RealtimeChannel | null = null;
 let answersChannel: RealtimeChannel | null = null;
 
+/** Coalesces concurrent `prepareMatch` calls (Realtime + polling) so the host
+ *  only ever generates rounds / activates the room once. */
+let activationPromise: Promise<{ ok: boolean; error?: string }> | null = null;
+
 export const useGameStore = create<GameState>((set, get) => ({
   roomId: '',
   playerId: '',
@@ -162,33 +166,48 @@ export const useGameStore = create<GameState>((set, get) => ({
   error: null,
 
   /** Host-only: generate rounds (if needed) and activate the room. */
-  prepareMatch: async (roomId) => {
-    if (!supabase) return { ok: false, error: 'Supabase is not configured' };
-
-    const room = await fetchRoom(roomId);
-    if (!room) return { ok: false, error: 'Room not found' };
-
-    const pool = await loadPool(room.track_pool_id);
-    if ('error' in pool) return { ok: false, error: pool.error };
-
-    const existing = await fetchRoundsForRoom(roomId);
-    if (!existing || existing.length === 0) {
-      const gen = await generateRoundsForRoom(roomId, pool.tracks);
-      if (!gen.ok) return { ok: false, error: gen.error };
+  prepareMatch: (roomId) => {
+    if (!supabase) {
+      return Promise.resolve({ ok: false, error: 'Supabase is not configured' });
     }
+    // Realtime + the polling fallback can both fire activation; coalesce them
+    // so rounds are generated exactly once.
+    if (activationPromise) return activationPromise;
 
-    const { error } = await supabase
-      .from('rooms')
-      .update({
-        status: 'active',
-        current_round: 1,
-        round_started_at: new Date().toISOString(),
-      })
-      .eq('id', roomId)
-      .eq('status', 'waiting'); // only the first activation wins
-    if (error) return { ok: false, error: error.message };
+    activationPromise = (async () => {
+      const room = await fetchRoom(roomId);
+      if (!room) return { ok: false, error: 'Room not found' };
 
-    return { ok: true };
+      if (!room.guest_id) {
+        return { ok: false, error: 'Waiting for opponent to join...' };
+      }
+
+      const pool = await loadPool(room.track_pool_id);
+      if ('error' in pool) return { ok: false, error: pool.error };
+
+      const existing = await fetchRoundsForRoom(roomId);
+      if (!existing || existing.length === 0) {
+        const gen = await generateRoundsForRoom(roomId, pool.tracks);
+        if (!gen.ok) return { ok: false, error: gen.error };
+      }
+
+      const { error } = await supabase
+        .from('rooms')
+        .update({
+          status: 'active',
+          current_round: 1,
+          round_started_at: new Date().toISOString(),
+        })
+        .eq('id', roomId)
+        .eq('status', 'waiting'); // only the first activation wins
+      if (error) return { ok: false, error: error.message };
+
+      return { ok: true };
+    })().finally(() => {
+      activationPromise = null;
+    });
+
+    return activationPromise;
   },
 
   /** Loads rounds + pool, subscribes to realtime, starts round 1 when active. */
@@ -348,6 +367,35 @@ async function fetchRoom(roomId: string) {
 }
 
 /**
+ * Host-only: activates the match the moment the opponent joins. Called both
+ * from Realtime updates and the polling fallback so the host's waiting screen
+ * gives way to round 1 as soon as the guest arrives. Returns true when the
+ * room was (re)activated by this call.
+ */
+async function maybeActivateHostRoom(room: any): Promise<boolean> {
+  const s = useGameStore.getState();
+  if (!s.isHost || !s.roomId) return false;
+  if (room.status !== 'waiting' || !room.guest_id) return false;
+  const res = await s.prepareMatch(s.roomId);
+  return res.ok;
+}
+
+/**
+ * Drives one tick of an "active" room: load rounds on first sight, then start
+ * any round the server says has begun. Shared by Realtime + polling so both
+ * players react to exactly the same `round_started_at`.
+ */
+async function processActiveRoom(room: any) {
+  const s = useGameStore.getState();
+  if (room.status !== 'active' || room.current_round < 1) return;
+  if (s.rounds.length === 0) {
+    await loadRoundsFromRoom(room);
+  } else if (s.currentRoundIndex < room.current_round) {
+    beginRound(room.current_round, room.round_started_at);
+  }
+}
+
+/**
  * Polls the room row for the entire match. Covers everything Realtime
  * websockets would normally deliver, so a match never hard-stalls:
  *  - the opening activation (guest joined before the host pressed Start),
@@ -369,13 +417,16 @@ function pollRoomSync(roomId: string) {
       clearStartPoll();
       return;
     }
-    if (room.status === 'active' && room.current_round >= 1) {
-      if (s.rounds.length === 0) {
-        await loadRoundsFromRoom(room);
-      } else if (s.currentRoundIndex < room.current_round) {
-        beginRound(room.current_round, room.round_started_at);
+    if (room.status === 'waiting') {
+      // Host auto-starts the match the moment the opponent joins.
+      const activated = await maybeActivateHostRoom(room);
+      if (activated) {
+        const fresh = await fetchRoom(roomId);
+        if (fresh) await processActiveRoom(fresh);
       }
+      return;
     }
+    await processActiveRoom(room);
   }, POLL_START_MS);
 }
 
@@ -423,6 +474,11 @@ function subscribeRoom(roomId: string) {
       },
       (payload) => {
         const room = payload.new as any;
+        if (room.status === 'waiting') {
+          // Host auto-activates as soon as the guest joins the room.
+          maybeActivateHostRoom(room);
+          return;
+        }
         if (room.status === 'active' && room.current_round >= 1) {
           // Guest may not have rounds yet when the host activates the match.
           const s = useGameStore.getState();
@@ -535,6 +591,16 @@ function beginRound(roundIndex: number, roundStartedAt: string | null) {
   const startedAtMs = roundStartedAt
     ? new Date(roundStartedAt).getTime()
     : Date.now();
+  const now = Date.now();
+
+  // Anchor timing to the server's `round_started_at` so both players hit the
+  // same countdown → clip-start → guess-cutoff wall-clock times. `min` with
+  // `now` guards against device-clock skew: a client that observes the room
+  // from a "future" timestamp (its clock behind the host's) would otherwise
+  // wait far too long and look frozen on "3".
+  const roundStartMs = Math.min(startedAtMs, now) + COUNTDOWN_MS;
+  const roundBaseMs = roundStartMs - COUNTDOWN_MS;
+  const until = (targetMs: number) => Math.max(0, targetMs - now);
 
   useGameStore.setState({
     currentRoundIndex: roundIndex,
@@ -554,10 +620,16 @@ function beginRound(roundIndex: number, roundStartedAt: string | null) {
   // Seed answered state from DB (reconnect safety).
   seedRoundAnswers(round.id);
 
-  later(() => useGameStore.setState({ countdownValue: 2 }), 1000);
-  later(() => useGameStore.setState({ countdownValue: 1 }), 2000);
+  later(
+    () => useGameStore.setState({ countdownValue: 2 }),
+    until(roundBaseMs + 1000)
+  );
+  later(
+    () => useGameStore.setState({ countdownValue: 1 }),
+    until(roundBaseMs + 2000)
+  );
   later(() => {
-    roundStartRef.at = startedAtMs + COUNTDOWN_MS;
+    roundStartRef.at = roundStartMs;
     useGameStore.setState({ roundState: 'playing' });
 
     // Auto-answer on timeout (empty = incorrect).
@@ -588,8 +660,8 @@ function beginRound(roundIndex: number, roundStartedAt: string | null) {
           pollForOpponentAnswer(s.currentRound.id);
         }
       }
-    }, ROUND_DURATION_MS + 500);
-  }, COUNTDOWN_MS);
+    }, until(roundStartMs + ROUND_DURATION_MS + 500));
+  }, until(roundStartMs));
 }
 
 async function seedRoundAnswers(roundId: string) {

@@ -59,10 +59,8 @@ export default function GameScreen() {
     submitAnswer,
   } = useGameStore();
 
-  const roundsEmpty = rounds.length === 0;
-
-  // The track name + album art are spoilers: only reveal them after the
-  // player has committed an answer (or the round resolves on timeout).
+  // Track name + album art are spoilers: reveal only after the player has
+  // committed an answer (or the round resolves on timeout).
   const revealTrack =
     roundState === 'answered' || roundState === 'result';
 
@@ -71,7 +69,9 @@ export default function GameScreen() {
   const { playClip, stopClip } = useClipPlayback(previewUrl, clipStartMs);
 
   const [elapsedDisplay, setElapsedDisplay] = useState('0:00');
-  const [remainingDisplay, setRemainingDisplay] = useState('-0:10');
+  const [remainingDisplay, setRemainingDisplay] = useState(
+    () => `-0:${(ROUND_DURATION_MS / 1000).toString().padStart(2, '0')}`
+  );
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Score animation
@@ -123,7 +123,9 @@ export default function GameScreen() {
     } else {
       if (timerRef.current) clearInterval(timerRef.current);
       setElapsedDisplay('0:00');
-      setRemainingDisplay('-0:10');
+      setRemainingDisplay(
+        `-0:${(ROUND_DURATION_MS / 1000).toString().padStart(2, '0')}`
+      );
     }
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
@@ -171,23 +173,41 @@ export default function GameScreen() {
             </Pressable>
           </View>
         ) : (
-          <View style={styles.loadingBlock}>
-            <ActivityIndicator size="large" color={Colors.primary} />
+          <Animated.View
+            entering={FadeIn.duration(500)}
+            style={styles.loadingBlock}
+          >
+            <View style={styles.loadingPulse}>
+              <MaterialCommunityIcons
+                name={isHost ? 'account-plus-outline' : 'headphones'}
+                size={40}
+                color={Colors.primary}
+              />
+            </View>
+            <Text style={styles.loadingTitle}>
+              {isHost
+                ? 'Waiting for your opponent'
+                : 'Waiting for the host'}
+            </Text>
             <Text style={styles.loadingText}>
               {loading
-                ? 'Loading...'
+                ? 'Preparing the match...'
                 : isHost
-                  ? 'Waiting for opponent to join...'
-                  : 'Waiting for the host to start the match...'}
+                  ? 'Share your room code to get playing'
+                  : 'The host will start the match soon...'}
             </Text>
-          </View>
+            <ActivityIndicator size="small" color={Colors.primary} />
+          </Animated.View>
         )}
       </View>
     );
   }
 
   return (
-    <View style={[styles.screen, { paddingTop: insets.top }]}>
+    <Animated.View
+      entering={FadeIn.duration(350)}
+      style={[styles.screen, { paddingTop: insets.top }]}
+    >
       {/* Countdown Overlay */}
       {roundState === 'countdown' && (
         <View style={styles.countdownOverlay}>
@@ -376,7 +396,7 @@ export default function GameScreen() {
           )}
         </View>
       </View>
-    </View>
+    </Animated.View>
   );
 }
 
@@ -391,6 +411,20 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: Spacing.md,
     paddingHorizontal: Spacing.containerPadding,
+  },
+  loadingPulse: {
+    width: 84,
+    height: 84,
+    borderRadius: 42,
+    backgroundColor: 'rgba(255,255,255,0.07)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  loadingTitle: {
+    color: Colors.primary,
+    fontFamily: 'Inter-Bold',
+    fontSize: 18,
+    textAlign: 'center',
   },
   loadingText: {
     color: Colors.textSubtle,

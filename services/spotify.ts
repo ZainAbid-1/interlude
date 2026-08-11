@@ -224,6 +224,8 @@ interface TrackCandidate {
 interface ResolvedPreview {
   url: string;
   source: 'itunes' | 'deezer';
+  /** Length of the preview FILE (both iTunes + Deezer previews are ~30s),
+   *  NOT the full track. Used to pick a clip start that actually fits. */
   durationMs: number;
 }
 
@@ -344,6 +346,47 @@ async function collectCandidates(
  * Resolves a free 3-second-playable preview for a track:
  * iTunes Search API first, Deezer as fallback.
  */
+/**
+ * Normalizes a name for tolerant comparison: lowercase, strips accents and
+ * punctuation, collapses whitespace. Used to verify a preview search result
+ * really is the artist + track we asked for (many songs share titles).
+ */
+function normalizeName(value: string): string {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9 ]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * True when `query` and `candidate` describe the same track title, allowing
+ * small differences like "(Remastered)" or "feat. ..." suffixes.
+ */
+function sameTrackName(query: string, candidate: string): boolean {
+  const q = normalizeName(query);
+  const c = normalizeName(candidate);
+  if (!q || !c) return false;
+  return q === c || q.includes(c) || c.includes(q);
+}
+
+/** True when `query` and `candidate` are the same artist name. */
+function sameArtistName(query: string, candidate: string): boolean {
+  const q = normalizeName(query);
+  const c = normalizeName(candidate);
+  return !!q && !!c && (q === c || q.includes(c) || c.includes(q));
+}
+
+/**
+ * Resolves a free 3-second-playable preview for a track:
+ * iTunes Search API first, Deezer as fallback.
+ *
+ * Results are matched against BOTH the requested artist name and track name,
+ * otherwise a same-titled song by a different artist can leak into the pool
+ * (e.g. a cartoon "Hello Kitty" instead of the artist's track).
+ */
 async function resolvePreview(
   artistName: string,
   trackName: string
@@ -352,16 +395,22 @@ async function resolvePreview(
   try {
     const term = encodeURIComponent(`${artistName} ${trackName}`);
     const res = await fetch(
-      `https://itunes.apple.com/search?term=${term}&entity=song&limit=1`
+      `https://itunes.apple.com/search?term=${term}&entity=song&limit=25`
     );
     if (res.ok) {
       const data = await res.json();
-      const result = data?.results?.[0];
-      if (result?.previewUrl) {
+      const results: any[] = data?.results ?? [];
+      for (const result of results) {
+        if (!result?.previewUrl) continue;
+        // Must actually be by the requested artist.
+        if (!sameArtistName(artistName, result.artistName ?? '')) continue;
+        if (!sameTrackName(trackName, result.trackName ?? '')) continue;
+        // iTunes preview files are standardized to ~30 seconds regardless of
+        // the full track length, so never use trackTimeMillis (full track).
         return {
           url: result.previewUrl,
           source: 'itunes',
-          durationMs: result.trackTimeMillis ?? 30000,
+          durationMs: 30000,
         };
       }
     }
@@ -372,11 +421,14 @@ async function resolvePreview(
   // 2. Deezer
   try {
     const q = encodeURIComponent(`artist:"${artistName}" track:"${trackName}"`);
-    const res = await fetch(`https://api.deezer.com/search?q=${q}&limit=1`);
+    const res = await fetch(`https://api.deezer.com/search?q=${q}&limit=10`);
     if (res.ok) {
       const data = await res.json();
-      const result = data?.data?.[0];
-      if (result?.preview) {
+      const results: any[] = data?.data ?? [];
+      for (const result of results) {
+        if (!result?.preview) continue;
+        if (!sameArtistName(artistName, result?.artist?.name ?? '')) continue;
+        if (!sameTrackName(trackName, result?.title ?? '')) continue;
         return { url: result.preview, source: 'deezer', durationMs: 30000 };
       }
     }
@@ -392,7 +444,8 @@ async function resolvePreview(
  * likely intro silence, random within a window so rounds aren't predictable.
  */
 function pickClipStart(durationMs: number): number {
-  const latest = Math.max(0, durationMs - 3000);
+  const previewMs = Math.min(durationMs, 30000); // preview files are ~30s
+  const latest = Math.max(0, previewMs - 3000);
   if (latest <= 0) return 0;
   const min = 4000;
   const start = Math.min(min, latest) + Math.floor(Math.random() * Math.max(1, latest - Math.min(min, latest)));
