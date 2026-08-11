@@ -6,22 +6,18 @@ import {
   StyleSheet,
   Dimensions,
   Pressable,
+  ActivityIndicator,
 } from 'react-native';
 import { router } from 'expo-router';
-import { BlurView } from 'expo-blur';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
-  withTiming,
   withSpring,
-  withDelay,
   withSequence,
   FadeIn,
   FadeInDown,
   FadeOut,
   ZoomIn,
-  Easing,
-  runOnJS,
 } from 'react-native-reanimated';
 import { MaterialCommunityIcons, Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -29,43 +25,54 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { GlassCard } from '../components/GlassCard';
 import { AnswerButton } from '../components/AnswerButton';
 import { ProgressBar } from '../components/ProgressBar';
-import { useGameStore } from '../store/gameStore';
-import { Colors, Spacing, BorderRadius, Typography } from '../constants/theme';
+import { useGameStore, ROUND_DURATION_MS } from '../store/gameStore';
+import { useRoomStore } from '../store/roomStore';
+import { useClipPlayback } from '../hooks/useClipPlayback';
+import { Colors, Spacing, BorderRadius } from '../constants/theme';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
-const ROUND_DURATION = 10000; // 10 seconds per round
 
 type AnswerState = 'default' | 'selected' | 'correct' | 'incorrect' | 'dimmed';
 
 export default function GameScreen() {
   const insets = useSafeAreaInsets();
-  const roundStartTime = useRef<number>(0);
-  const [countdownNum, setCountdownNum] = useState(3);
-  const [showCountdown, setShowCountdown] = useState(true);
-  const [elapsedDisplay, setElapsedDisplay] = useState('0:00');
-  const [remainingDisplay, setRemainingDisplay] = useState('-0:10');
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const roomId = useRoomStore((s) => s.roomId);
+  const isHost = useRoomStore((s) => s.isHost);
 
   const {
-    artistName,
-    artistImage,
     currentRoundIndex,
     totalRounds,
     currentRound,
     roundState,
+    countdownValue,
     selectedAnswer,
     isCorrect,
     pointsAwarded,
     playerScore,
     opponentScore,
-    startCountdown,
-    startPlaying,
-    submitAnswer,
-    showResult,
-    nextRound,
-    isGameOver,
+    rounds,
+    loading,
+    error,
+    gameOver,
     initGame,
+    submitAnswer,
   } = useGameStore();
+
+  const roundsEmpty = rounds.length === 0;
+
+  // The track name + album art are spoilers: only reveal them after the
+  // player has committed an answer (or the round resolves on timeout).
+  const revealTrack =
+    roundState === 'answered' || roundState === 'result';
+
+  const previewUrl = currentRound?.track?.preview_url ?? null;
+  const clipStartMs = currentRound?.track?.clip_start_ms ?? 0;
+  const { playClip, stopClip } = useClipPlayback(previewUrl, clipStartMs);
+
+  const [elapsedDisplay, setElapsedDisplay] = useState('0:00');
+  const [remainingDisplay, setRemainingDisplay] = useState('-0:10');
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Score animation
   const scoreScale = useSharedValue(1);
@@ -73,105 +80,78 @@ export default function GameScreen() {
     transform: [{ scale: scoreScale.value }],
   }));
 
-  // Initialize game and start first round countdown
+  // Initialize the match from the active room.
   useEffect(() => {
-    if (!currentRound) {
-      initGame();
+    if (!roomId) {
+      router.replace('/');
+      return;
     }
-    startInitialCountdown();
+    initGame(roomId, isHost);
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
     };
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [roomId]);
 
-  const startInitialCountdown = () => {
-    setShowCountdown(true);
-    setCountdownNum(3);
+  // Navigate to results when the match completes.
+  useEffect(() => {
+    if (gameOver) {
+      router.replace('/results');
+    }
+  }, [gameOver]);
 
-    let count = 3;
-    const interval = setInterval(() => {
-      count--;
-      if (count > 0) {
-        setCountdownNum(count);
-      } else {
-        clearInterval(interval);
-        setShowCountdown(false);
-        beginPlaying();
-      }
-    }, 1000);
-  };
+  // Play the 3-second clip as soon as the round starts playing.
+  useEffect(() => {
+    if (roundState === 'playing') {
+      playClip();
+    } else {
+      stopClip();
+    }
+  }, [roundState, playClip, stopClip]);
 
-  const beginPlaying = () => {
-    startPlaying();
-    roundStartTime.current = Date.now();
-
-    // Elapsed / remaining time display
-    let elapsed = 0;
-    timerRef.current = setInterval(() => {
-      elapsed += 100;
-      const secs = Math.floor(elapsed / 1000);
-      const remainSecs = Math.max(0, 10 - secs);
-      setElapsedDisplay(`0:${secs.toString().padStart(2, '0')}`);
-      setRemainingDisplay(`-0:${remainSecs.toString().padStart(2, '0')}`);
-    }, 100);
-  };
+  // Elapsed / remaining time display during play.
+  useEffect(() => {
+    if (roundState === 'playing') {
+      let elapsed = 0;
+      timerRef.current = setInterval(() => {
+        elapsed += 100;
+        const secs = Math.floor(elapsed / 1000);
+        const remainSecs = Math.max(0, Math.floor((ROUND_DURATION_MS - elapsed) / 1000));
+        setElapsedDisplay(`0:${secs.toString().padStart(2, '0')}`);
+        setRemainingDisplay(`-0:${remainSecs.toString().padStart(2, '0')}`);
+      }, 100);
+    } else {
+      if (timerRef.current) clearInterval(timerRef.current);
+      setElapsedDisplay('0:00');
+      setRemainingDisplay('-0:10');
+    }
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, [roundState]);
 
   const handleAnswer = useCallback(
     (answer: string) => {
       if (roundState !== 'playing') return;
-
-      if (timerRef.current) clearInterval(timerRef.current);
-
-      const responseMs = Date.now() - roundStartTime.current;
-      submitAnswer(answer, responseMs);
-
-      // Show result after brief delay
-      setTimeout(() => {
-        showResult();
-        scoreScale.value = withSequence(
-          withSpring(1.3, { damping: 8 }),
-          withSpring(1, { damping: 12 })
-        );
-
-        // Auto-advance after showing result
-        setTimeout(() => {
-          if (isGameOver()) {
-            router.replace('/results');
-          } else {
-            nextRound();
-            startInitialCountdown();
-          }
-        }, 2000);
-      }, 500);
+      submitAnswer(answer);
+      scoreScale.value = withSequence(
+        withSpring(1.3, { damping: 8 }),
+        withSpring(1, { damping: 12 })
+      );
     },
-    [roundState]
+    [roundState, submitAnswer, scoreScale]
   );
 
   const handleTimeout = useCallback(() => {
     if (roundState !== 'playing') return;
-    if (timerRef.current) clearInterval(timerRef.current);
-
-    // Auto-submit empty answer on timeout
-    submitAnswer('', 10000);
-    setTimeout(() => {
-      showResult();
-      setTimeout(() => {
-        if (isGameOver()) {
-          router.replace('/results');
-        } else {
-          nextRound();
-          startInitialCountdown();
-        }
-      }, 2000);
-    }, 500);
-  }, [roundState]);
+    submitAnswer('');
+  }, [roundState, submitAnswer]);
 
   const getButtonState = (option: string): AnswerState => {
     if (roundState === 'playing' || roundState === 'countdown') return 'default';
 
     if (roundState === 'answered' || roundState === 'result') {
       if (!currentRound) return 'default';
-
       if (option === currentRound.correctAnswer) return 'correct';
       if (option === selectedAnswer && !isCorrect) return 'incorrect';
       return 'dimmed';
@@ -180,10 +160,28 @@ export default function GameScreen() {
     return 'default';
   };
 
-  if (!currentRound) {
+  if (loading || !currentRound) {
     return (
       <View style={[styles.screen, { paddingTop: insets.top }]}>
-        <Text style={styles.loadingText}>Loading...</Text>
+        {error ? (
+          <View style={styles.loadingBlock}>
+            <Text style={styles.errorText}>{error}</Text>
+            <Pressable style={styles.errorButton} onPress={() => router.replace('/')}>
+              <Text style={styles.errorButtonText}>Back to Home</Text>
+            </Pressable>
+          </View>
+        ) : (
+          <View style={styles.loadingBlock}>
+            <ActivityIndicator size="large" color={Colors.primary} />
+            <Text style={styles.loadingText}>
+              {loading
+                ? 'Loading...'
+                : isHost
+                  ? 'Waiting for opponent to join...'
+                  : 'Waiting for the host to start the match...'}
+            </Text>
+          </View>
+        )}
       </View>
     );
   }
@@ -191,24 +189,21 @@ export default function GameScreen() {
   return (
     <View style={[styles.screen, { paddingTop: insets.top }]}>
       {/* Countdown Overlay */}
-      {showCountdown && (
+      {roundState === 'countdown' && (
         <View style={styles.countdownOverlay}>
           <Animated.View
-            key={countdownNum}
+            key={countdownValue}
             entering={ZoomIn.duration(400)}
             exiting={FadeOut.duration(200)}
           >
-            <Text style={styles.countdownNumber}>{countdownNum}</Text>
+            <Text style={styles.countdownNumber}>{countdownValue}</Text>
           </Animated.View>
           <Text style={styles.countdownLabel}>Get Ready</Text>
         </View>
       )}
 
       {/* Header */}
-      <Animated.View
-        entering={FadeIn.delay(200)}
-        style={styles.header}
-      >
+      <Animated.View entering={FadeIn.delay(200)} style={styles.header}>
         <View style={styles.headerLeft}>
           <Pressable onPress={() => router.back()} style={styles.backButton}>
             <Ionicons name="close" size={24} color={Colors.primary} />
@@ -224,7 +219,7 @@ export default function GameScreen() {
           </View>
           <View style={styles.scoreDivider} />
           <View style={styles.scoreBlock}>
-            <Text style={styles.scoreLabel}>Alex</Text>
+            <Text style={styles.scoreLabel}>Opponent</Text>
             <Text style={styles.scoreValueOpponent}>{opponentScore}</Text>
           </View>
         </Animated.View>
@@ -233,25 +228,45 @@ export default function GameScreen() {
       {/* Main Content */}
       <View style={styles.content}>
         <View style={styles.cardContainer}>
-          {/* Artist Card — matches Stitch reference */}
+          {/* Artist Card */}
           <Animated.View entering={FadeInDown.delay(300).duration(500)}>
             <GlassCard borderRadius={24} padding={24}>
               {/* Album Art */}
               <View style={styles.albumArtContainer}>
-                <Image
-                  source={{ uri: artistImage || currentRound.track.albumArt }}
-                  style={styles.albumArt}
-                />
+                {revealTrack && currentRound.track?.album_art_url ? (
+                  <Image
+                    source={{ uri: currentRound.track.album_art_url }}
+                    style={styles.albumArt}
+                  />
+                ) : (
+                  <View style={styles.albumArtPlaceholder}>
+                    <MaterialCommunityIcons
+                      name="music-note"
+                      size={48}
+                      color={Colors.textSubtle}
+                    />
+                    <Text style={styles.albumArtHint}>
+                      {revealTrack ? 'Guess the track' : 'Listen to the clip'}
+                    </Text>
+                  </View>
+                )}
               </View>
 
               {/* Artist Info + Progress */}
               <View style={styles.trackInfo}>
                 <View style={styles.trackInfoRow}>
-                  <View>
-                    <Text style={styles.artistNameText}>{artistName}</Text>
+                  <View style={styles.trackNameWrap}>
+                    <Text style={styles.artistNameText} numberOfLines={1}>
+                      {revealTrack
+                        ? (currentRound.track?.track_name ?? 'Playing')
+                        : 'Guess the track'}
+                    </Text>
+                    <Text style={styles.artistSubText} numberOfLines={1}>
+                      {revealTrack ? 'Correct answer' : 'Tap to hear a clip'}
+                    </Text>
                   </View>
                   <MaterialCommunityIcons
-                    name="cast"
+                    name={roundState === 'playing' ? 'volume-high' : 'music-note'}
                     size={20}
                     color={Colors.textSubtle}
                   />
@@ -260,7 +275,7 @@ export default function GameScreen() {
                 {/* Progress Bar */}
                 <View style={styles.progressSection}>
                   <ProgressBar
-                    duration={ROUND_DURATION}
+                    duration={ROUND_DURATION_MS}
                     isActive={roundState === 'playing'}
                     onComplete={handleTimeout}
                     height={4}
@@ -336,15 +351,26 @@ export default function GameScreen() {
                 <Text
                   style={[
                     styles.resultText,
-                    {
-                      color: isCorrect ? Colors.correct : Colors.incorrect,
-                    },
+                    { color: isCorrect ? Colors.correct : Colors.incorrect },
                   ]}
                 >
                   {isCorrect
                     ? `+${pointsAwarded} pts`
                     : `Correct: ${currentRound.correctAnswer}`}
                 </Text>
+              </View>
+            </Animated.View>
+          )}
+
+          {/* Waiting for opponent */}
+          {roundState === 'answered' && (
+            <Animated.View
+              entering={FadeInDown.duration(300)}
+              style={styles.resultFeedback}
+            >
+              <View style={styles.waitingBadge}>
+                <ActivityIndicator size="small" color={Colors.textSubtle} />
+                <Text style={styles.waitingText}>Waiting for opponent...</Text>
               </View>
             </Animated.View>
           )}
@@ -359,12 +385,35 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: Colors.background,
   },
+  loadingBlock: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.md,
+    paddingHorizontal: Spacing.containerPadding,
+  },
   loadingText: {
     color: Colors.textSubtle,
     fontFamily: 'Inter',
+    fontSize: 15,
+    textAlign: 'center',
+  },
+  errorText: {
+    color: Colors.incorrect,
+    fontFamily: 'Inter-Bold',
     fontSize: 16,
     textAlign: 'center',
-    marginTop: 100,
+  },
+  errorButton: {
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderRadius: BorderRadius.full,
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+  },
+  errorButtonText: {
+    fontFamily: 'Inter-Bold',
+    fontSize: 14,
+    color: Colors.primary,
   },
 
   // Countdown
@@ -474,6 +523,19 @@ const styles = StyleSheet.create({
     height: '100%',
     resizeMode: 'cover',
   },
+  albumArtPlaceholder: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Colors.surfaceContainerLow,
+    gap: Spacing.sm,
+  },
+  albumArtHint: {
+    fontFamily: 'Inter',
+    fontSize: 12,
+    color: Colors.textSubtle,
+    marginTop: Spacing.sm,
+  },
 
   // Track Info
   trackInfo: {
@@ -482,12 +544,22 @@ const styles = StyleSheet.create({
   trackInfoRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'flex-end',
+    alignItems: 'center',
+  },
+  trackNameWrap: {
+    flex: 1,
+    marginRight: Spacing.sm,
   },
   artistNameText: {
     fontFamily: 'PlayfairDisplay',
-    fontSize: 24,
+    fontSize: 22,
     color: Colors.primary,
+  },
+  artistSubText: {
+    fontFamily: 'Inter',
+    fontSize: 12,
+    color: Colors.textSubtle,
+    marginTop: 2,
   },
 
   // Progress
@@ -530,5 +602,19 @@ const styles = StyleSheet.create({
   resultText: {
     fontFamily: 'Inter-Bold',
     fontSize: 14,
+  },
+  waitingBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: BorderRadius.full,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+  },
+  waitingText: {
+    fontFamily: 'Inter',
+    fontSize: 13,
+    color: Colors.textSubtle,
   },
 });

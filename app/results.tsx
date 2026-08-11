@@ -83,7 +83,7 @@ export default function ResultsScreen() {
                 <Text style={styles.vsText}>VS</Text>
               </View>
               <View style={styles.scorePlayerBlock}>
-                <Text style={styles.scorePlayerLabel}>Alex</Text>
+                <Text style={styles.scorePlayerLabel}>Opponent</Text>
                 <Text style={styles.scorePlayerValueOpp}>
                   {opponentScore}
                 </Text>

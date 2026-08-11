@@ -25,7 +25,6 @@ export default function SettingsScreen() {
 
   const session = useAuthStore((s) => s.session);
   const profile = useAuthStore((s) => s.profile);
-  const isGuest = useAuthStore((s) => s.isGuest);
   const signOut = useAuthStore((s) => s.signOut);
 
   const handleSignOut = () => {
@@ -50,7 +49,7 @@ export default function SettingsScreen() {
     router.replace('/login');
   };
 
-  const isLoggedIn = Boolean(session || isGuest);
+  const isLoggedIn = Boolean(session);
 
   return (
     <View style={[styles.screen, { paddingTop: insets.top }]}>
@@ -85,18 +84,13 @@ export default function SettingsScreen() {
               )}
               <View style={styles.profileInfo}>
                 <Text style={styles.displayName} numberOfLines={1}>
-                  {profile?.display_name ?? (isGuest ? 'Guest Player' : 'Not Signed In')}
+                  {profile?.display_name ?? 'Not Signed In'}
                 </Text>
                 <View style={styles.badgeRow}>
                   {session ? (
                     <View style={styles.providerBadge}>
                       <Ionicons name="logo-google" size={12} color={WARM_GOLD} />
                       <Text style={styles.badgeText}>Signed in with Google</Text>
-                    </View>
-                  ) : isGuest ? (
-                    <View style={styles.providerBadge}>
-                      <Ionicons name="person-outline" size={12} color={WARM_GOLD} />
-                      <Text style={styles.badgeText}>Guest Account</Text>
                     </View>
                   ) : (
                     <View style={styles.providerBadge}>

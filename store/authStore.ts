@@ -15,11 +15,9 @@ export interface UserProfile {
 interface AuthState {
   session: Session | null;
   profile: UserProfile | null;
-  isGuest: boolean;
   loading: boolean;
   hydrate: () => () => void;
   signInWithGoogle: () => Promise<{ error: string | null }>;
-  signInAsGuest: () => void;
   signOut: () => Promise<void>;
 }
 
@@ -47,7 +45,6 @@ async function ensureProfile(user: User | null | undefined): Promise<UserProfile
 export const useAuthStore = create<AuthState>((set) => ({
   session: null,
   profile: null,
-  isGuest: false,
   loading: true,
 
   hydrate: () => {
@@ -65,12 +62,12 @@ export const useAuthStore = create<AuthState>((set) => ({
 
     const { data } = supabase.auth.onAuthStateChange(
       (event, session) => {
-        set({ session, loading: false, isGuest: false });
+        set({ session, loading: false });
         if (event === 'SIGNED_IN') {
           ensureProfile(session?.user).then((p) => set({ profile: p ?? null }));
         }
         if (event === 'SIGNED_OUT') {
-          set({ profile: null, isGuest: false });
+          set({ profile: null });
         }
       }
     );
@@ -149,20 +146,8 @@ export const useAuthStore = create<AuthState>((set) => ({
     }
   },
 
-  signInAsGuest: () => {
-
-    set({
-      isGuest: true,
-      profile: {
-        id: 'guest_' + Math.random().toString(36).substring(2, 8),
-        display_name: 'Guest Player',
-        avatar_url: null,
-      },
-    });
-  },
-
   signOut: async () => {
-    set({ isGuest: false, profile: null, session: null });
+    set({ profile: null, session: null });
     await supabase?.auth.signOut();
   },
 }));

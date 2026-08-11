@@ -10,6 +10,7 @@ import {
   Share,
   TextInput,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { router } from 'expo-router';
 import Animated, {
@@ -57,9 +58,13 @@ export default function HomeScreen() {
   const [searching, setSearching] = useState(false);
 
   const roomCode = useRoomStore((s) => s.roomCode);
+  const roomId = useRoomStore((s) => s.roomId);
+  const creatingRoom = useRoomStore((s) => s.creatingRoom);
+  const joiningRoom = useRoomStore((s) => s.joiningRoom);
   const createRoom = useRoomStore((s) => s.createRoom);
   const joinRoom = useRoomStore((s) => s.joinRoom);
-  const initGame = useGameStore((s) => s.initGame);
+  const resetRoom = useRoomStore((s) => s.resetRoom);
+  const prepareMatch = useGameStore((s) => s.prepareMatch);
 
   // Dev-only smoke check: confirms the client reaches Supabase.
   useEffect(() => {
@@ -109,43 +114,63 @@ export default function HomeScreen() {
     };
   }, [artistQuery]);
 
-  const ensureRoom = () => {
-    if (!roomCode && chosenArtist) {
-      createRoom(chosenArtist.name, chosenArtist.image);
+  const ensureRoom = async () => {
+    if (roomCode) return true;
+    if (!chosenArtist || creatingRoom) return false;
+    const res = await createRoom(chosenArtist);
+    if (!res.ok) {
+      Alert.alert('Could not create room', res.error ?? 'Something went wrong');
+      return false;
     }
+    return true;
   };
 
   const toggleCreate = () => {
     const next = !showCreate;
-    if (next) ensureRoom();
+    if (next) {
+      ensureRoom();
+    }
     setShowCreate(next);
   };
 
-  const startGame = () => {
+  const startGame = async () => {
     if (!chosenArtist) return;
-    createRoom(chosenArtist.name, chosenArtist.image);
-    initGame();
+    const ok = await ensureRoom();
+    if (!ok) return;
+    const match = await prepareMatch(roomId);
+    if (!match.ok) {
+      Alert.alert('Could not start match', match.error ?? 'Something went wrong');
+      return;
+    }
     router.push('/game');
   };
 
-  const selectArtist = (artist: SpotifyArtist) => {
+  const selectArtist = async (artist: SpotifyArtist) => {
     setChosenArtist(artist);
     setSearchActive(false);
     setArtistQuery('');
     setArtistMatches([]);
-    createRoom(artist.name, artist.image);
+    if (roomCode) resetRoom();
+    const res = await createRoom(artist);
+    if (!res.ok) {
+      Alert.alert('Could not create room', res.error ?? 'Something went wrong');
+    }
   };
 
-  const handleJoinRoom = () => {
+  const handleJoinRoom = async () => {
     if (joinCode.length === 6) {
-      joinRoom(joinCode);
-      initGame();
+      const res = await joinRoom(joinCode);
+      if (!res.ok) {
+        Alert.alert('Could not join room', res.error ?? 'Something went wrong');
+        return;
+      }
       router.push('/game');
     }
   };
 
   const handleShareInvite = async () => {
-    ensureRoom();
+    const ok = await ensureRoom();
+    if (!ok) return;
     try {
       await Share.share({
         message: `Join my Interlude room! Code: ${roomCode}\n\nPlay now: interlude://join/${roomCode}`,
@@ -157,7 +182,8 @@ export default function HomeScreen() {
   };
 
   const handleCopyLink = async () => {
-    ensureRoom();
+    const ok = await ensureRoom();
+    if (!ok) return;
     await Clipboard.setStringAsync(`interlude://join/${roomCode}`);
     setCopied(true);
     setTimeout(() => setCopied(false), 1600);
@@ -361,13 +387,23 @@ export default function HomeScreen() {
               </View>
 
               <View style={styles.linkRow}>
-                <Text style={styles.linkText} numberOfLines={1}>
-                  interlude://join/{roomCode}
-                </Text>
+                {creatingRoom ? (
+                  <View style={styles.linkLoading}>
+                    <ActivityIndicator size="small" color={WARM_GOLD_BRIGHT} />
+                    <Text style={styles.linkLoadingText}>
+                      Building your 10-track pool...
+                    </Text>
+                  </View>
+                ) : (
+                  <Text style={styles.linkText} numberOfLines={1}>
+                    interlude://join/{roomCode}
+                  </Text>
+                )}
                 <Pressable
                   onPress={handleCopyLink}
                   hitSlop={8}
                   style={styles.copyButton}
+                  disabled={creatingRoom || !roomCode}
                 >
                   <Ionicons
                     name={copied ? 'checkmark' : 'copy-outline'}
@@ -380,18 +416,31 @@ export default function HomeScreen() {
               <View style={styles.inviteButtonsRow}>
                 <Pressable
                   onPress={handleShareInvite}
-                  style={styles.shareButton}
+                  disabled={creatingRoom || !roomCode}
+                  style={[
+                    styles.shareButton,
+                    (creatingRoom || !roomCode) && styles.buttonMuted,
+                  ]}
                 >
                   <Ionicons name="share-outline" size={16} color="#241505" />
                   <Text style={styles.shareButtonText}>Share Invite</Text>
                 </Pressable>
                 <Pressable
                   onPress={startGame}
-                  style={[styles.startButton, !chosenArtist && styles.startButtonDisabled]}
-                  disabled={!chosenArtist}
+                  style={[
+                    styles.startButton,
+                    (!chosenArtist || creatingRoom) && styles.startButtonDisabled,
+                  ]}
+                  disabled={!chosenArtist || creatingRoom}
                 >
-                  <Text style={styles.startButtonText}>Start Game</Text>
-                  <Ionicons name="arrow-forward" size={16} color="#241505" />
+                  {creatingRoom ? (
+                    <ActivityIndicator size="small" color="#241505" />
+                  ) : (
+                    <>
+                      <Text style={styles.startButtonText}>Start Game</Text>
+                      <Ionicons name="arrow-forward" size={16} color="#241505" />
+                    </>
+                  )}
                 </Pressable>
               </View>
             </GlassCard>
@@ -440,11 +489,15 @@ export default function HomeScreen() {
                 onPress={handleJoinRoom}
                 style={[
                   styles.joinButton,
-                  joinCode.length < 6 && styles.joinButtonDisabled,
+                  (joinCode.length < 6 || joiningRoom) && styles.joinButtonDisabled,
                 ]}
-                disabled={joinCode.length < 6}
+                disabled={joinCode.length < 6 || joiningRoom}
               >
-                <Text style={styles.joinButtonText}>Join Game</Text>
+                {joiningRoom ? (
+                  <ActivityIndicator size="small" color={Colors.background} />
+                ) : (
+                  <Text style={styles.joinButtonText}>Join Game</Text>
+                )}
               </Pressable>
             </GlassCard>
           </Animated.View>
@@ -538,15 +591,14 @@ function FloatingDot({ config }: { config: any }) {
 function AuthPill() {
   const session = useAuthStore((s) => s.session);
   const profile = useAuthStore((s) => s.profile);
-  const isGuest = useAuthStore((s) => s.isGuest);
   const loading = useAuthStore((s) => s.loading);
   const signOut = useAuthStore((s) => s.signOut);
 
   const handlePress = async () => {
-    if (session || isGuest) {
+    if (session) {
       Alert.alert(
         profile?.display_name ?? 'Interlude Player',
-        isGuest ? 'Signed in as Guest' : 'Signed in with Google',
+        'Signed in with Google',
         [
           { text: 'Cancel', style: 'cancel' },
           {
@@ -909,6 +961,21 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: WARM_GOLD_BRIGHT,
     letterSpacing: 0.3,
+  },
+  linkLoading: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+  },
+  linkLoadingText: {
+    fontFamily: 'Inter',
+    fontSize: 13,
+    color: Colors.textMuted,
+    flexShrink: 1,
+  },
+  buttonMuted: {
+    opacity: 0.4,
   },
   copyButton: {
     paddingLeft: Spacing.sm,

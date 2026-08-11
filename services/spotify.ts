@@ -227,13 +227,25 @@ interface ResolvedPreview {
   durationMs: number;
 }
 
+function shuffle<T>(arr: T[]): T[] {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
 /**
- * Collects candidate tracks for an artist (top tracks first, then
- * album/single tracks), deduped by track id.
+ * Collects candidate tracks for an artist, deduped by track id.
+ * Tries top tracks first, then album/single tracks, and finally falls back
+ * to paged search results (the search endpoint keeps working even when the
+ * top-tracks/albums endpoints are restricted for a given app/token).
  */
 async function collectCandidates(
   token: string,
   artistId: string,
+  artistName: string,
   cap = 40
 ): Promise<TrackCandidate[]> {
   const byId = new Map<string, TrackCandidate>();
@@ -288,6 +300,43 @@ async function collectCandidates(
     // best effort
   }
 
+  // 3. Fallback: paged search. Some tokens/apps can't call the
+  // top-tracks/albums endpoints (403/400), but search still works.
+  if (byId.size < cap) {
+    for (const q of [`artist:"${artistName}"`, artistName]) {
+      try {
+        let offset = 0;
+        while (byId.size < cap && offset < cap * 4) {
+          const url = `${API_ENDPOINT}/search?q=${encodeURIComponent(q)}&type=track&limit=10&offset=${offset}&market=US`;
+          const res = await fetch(url, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          if (!res.ok) break;
+          const data = await res.json();
+          const items: any[] = data?.tracks?.items ?? [];
+          if (items.length === 0) break;
+
+          for (const item of items) {
+            // Keep only tracks actually credited to the target artist.
+            const isTarget = (item?.artists ?? []).some(
+              (a: any) => a?.id === artistId
+            );
+            if (!isTarget || byId.has(item.id)) continue;
+            if (byId.size >= cap) break;
+            byId.set(item.id, {
+              id: item.id,
+              name: item.name,
+              albumArtUrl: pickImage(item?.album?.images),
+            });
+          }
+          offset += 10;
+        }
+      } catch (e) {
+        // continue with the next search query
+      }
+    }
+  }
+
   return Array.from(byId.values()).slice(0, cap);
 }
 
@@ -339,10 +388,25 @@ async function resolvePreview(
 }
 
 /**
+ * Picks a clip start offset for the 3-second clip: a few seconds past the
+ * likely intro silence, random within a window so rounds aren't predictable.
+ */
+function pickClipStart(durationMs: number): number {
+  const latest = Math.max(0, durationMs - 3000);
+  if (latest <= 0) return 0;
+  const min = 4000;
+  const start = Math.min(min, latest) + Math.floor(Math.random() * Math.max(1, latest - Math.min(min, latest)));
+  return Math.round(start);
+}
+
+/**
  * Builds a room track pool for an artist: up to `limit` tracks that
  * have a resolvable free preview. Returns [] if credentials are missing
  * or the catalog has no playable previews (host should pick another
  * artist or more candidates should be pulled).
+ *
+ * Candidates are shuffled before previews are resolved so the pool is a
+ * varied slice of the catalog rather than the obvious top-10 hits.
  */
 export async function getArtistTrackPool(
   artistId: string,
@@ -353,7 +417,7 @@ export async function getArtistTrackPool(
 
   try {
     const token = await getToken();
-    const candidates = await collectCandidates(token, artistId, limit * 4);
+    const candidates = shuffle(await collectCandidates(token, artistId, artistName, limit * 5));
     const pool: TrackPoolItem[] = [];
 
     for (const track of candidates) {
@@ -367,10 +431,7 @@ export async function getArtistTrackPool(
         previewUrl: preview.url,
         previewSource: preview.source,
         durationMs: preview.durationMs,
-        clipStartMs: Math.min(
-          8000,
-          Math.max(0, preview.durationMs - 4000)
-        ),
+        clipStartMs: pickClipStart(preview.durationMs),
       });
     }
 

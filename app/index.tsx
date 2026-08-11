@@ -7,7 +7,6 @@ import LoginScreen from './login';
 
 export default function EntryScreen() {
   const session = useAuthStore((s) => s.session);
-  const isGuest = useAuthStore((s) => s.isGuest);
   const loading = useAuthStore((s) => s.loading);
 
   if (loading) {
@@ -19,7 +18,7 @@ export default function EntryScreen() {
     );
   }
 
-  if (session || isGuest) {
+  if (session) {
     return <Redirect href="/(tabs)" />;
   }
 

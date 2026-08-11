@@ -1,9 +1,19 @@
 import { create } from 'zustand';
+import type { SpotifyArtist, TrackPoolItem } from '../services/spotify';
+import { getArtistTrackPool } from '../services/spotify';
+import {
+  saveTrackPool,
+  createRoom as createRoomRow,
+  joinRoom as joinRoomRow,
+  loadPool,
+} from '../services/rooms';
+import type { RoomPoolTrack } from '../services/rooms';
 
 type RoomStatus = 'idle' | 'waiting' | 'ready' | 'active' | 'completed';
 
 interface RoomState {
   // Room info
+  roomId: string;
   roomCode: string;
   roomStatus: RoomStatus;
   hostName: string;
@@ -11,68 +21,131 @@ interface RoomState {
   artistName: string;
   artistImage: string;
 
+  // Pool (persisted tracks with previews)
+  poolId: string;
+  poolTracks: RoomPoolTrack[];
+
   // Readiness
   isHost: boolean;
   isReady: boolean;
   opponentReady: boolean;
 
-  // Actions
-  createRoom: (artistName: string, artistImage: string) => void;
-  joinRoom: (code: string) => void;
+  // Loading / errors
+  creatingRoom: boolean;
+  joiningRoom: boolean;
+  roomError: string | null;
+
+  // Actions (Supabase-backed)
+  createRoom: (artist: SpotifyArtist) => Promise<{ ok: boolean; error?: string }>;
+  joinRoom: (code: string) => Promise<{ ok: boolean; error?: string }>;
   setReady: () => void;
   startMatch: () => void;
   resetRoom: () => void;
-}
-
-function generateRoomCode(): string {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-  let code = '';
-  for (let i = 0; i < 6; i++) {
-    code += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return code;
+  loadPoolById: (poolId: string) => Promise<{ artist: any; tracks: RoomPoolTrack[] } | null>;
 }
 
 export const useRoomStore = create<RoomState>((set, get) => ({
+  roomId: '',
   roomCode: '',
   roomStatus: 'idle',
   hostName: 'You',
   guestName: null,
   artistName: '',
   artistImage: '',
+  poolId: '',
+  poolTracks: [],
   isHost: false,
   isReady: false,
   opponentReady: false,
+  creatingRoom: false,
+  joiningRoom: false,
+  roomError: null,
 
-  createRoom: (artistName: string, artistImage: string) => {
+  createRoom: async (artist) => {
+    if (get().creatingRoom) return { ok: false, error: 'Already creating a room' };
+
+    set({ creatingRoom: true, roomError: null });
+
+    // 1. Generate a varied 10-track pool with free previews
+    const pool: TrackPoolItem[] = await getArtistTrackPool(artist.id, artist.name, 10);
+    if (pool.length < 10) {
+      set({
+        creatingRoom: false,
+        roomError: `Only ${pool.length}/10 tracks have playable previews. Try another artist.`,
+      });
+      return { ok: false, error: 'Not enough previews for this artist' };
+    }
+
+    // 2. Persist pool to Supabase
+    const saved = await saveTrackPool(artist, pool);
+    if ('error' in saved) {
+      set({ creatingRoom: false, roomError: saved.error });
+      return { ok: false, error: saved.error };
+    }
+
+    // 3. Create room with a unique code
+    const room = await createRoomRow(saved.poolId);
+    if ('error' in room) {
+      set({ creatingRoom: false, roomError: room.error });
+      return { ok: false, error: room.error };
+    }
+
     set({
-      roomCode: generateRoomCode(),
+      roomId: room.roomId,
+      roomCode: room.code,
       roomStatus: 'waiting',
       hostName: 'You',
       guestName: null,
-      artistName,
-      artistImage,
+      artistName: artist.name,
+      artistImage: artist.image,
+      poolId: saved.poolId,
+      poolTracks: pool.map((t, i) => ({
+        id: '',
+        position: i + 1,
+        spotify_track_id: t.spotifyTrackId,
+        track_name: t.trackName,
+        album_art_url: t.albumArtUrl,
+        preview_url: t.previewUrl,
+        preview_source: t.previewSource,
+        clip_start_ms: t.clipStartMs,
+      })),
       isHost: true,
       isReady: false,
       opponentReady: false,
+      creatingRoom: false,
     });
 
-    // Simulate guest joining after 2 seconds
-    setTimeout(() => {
-      set({ guestName: 'Alex', opponentReady: true });
-    }, 2000);
+    return { ok: true };
   },
 
-  joinRoom: (code: string) => {
+  joinRoom: async (code) => {
+    if (get().joiningRoom) return { ok: false, error: 'Already joining a room' };
+
+    set({ joiningRoom: true, roomError: null });
+
+    const result = await joinRoomRow(code);
+    if ('error' in result) {
+      set({ joiningRoom: false, roomError: result.error });
+      return { ok: false, error: result.error };
+    }
+
     set({
-      roomCode: code.toUpperCase(),
+      roomId: result.room.id,
+      roomCode: result.room.code,
       roomStatus: 'waiting',
       hostName: 'Host',
       guestName: 'You',
+      artistName: result.artist.name,
+      artistImage: result.artist.image,
+      poolId: result.room.track_pool_id,
+      poolTracks: result.tracks,
       isHost: false,
       isReady: false,
       opponentReady: true,
+      joiningRoom: false,
     });
+
+    return { ok: true };
   },
 
   setReady: () => set({ isReady: true }),
@@ -81,14 +154,32 @@ export const useRoomStore = create<RoomState>((set, get) => ({
 
   resetRoom: () =>
     set({
+      roomId: '',
       roomCode: '',
       roomStatus: 'idle',
       hostName: 'You',
       guestName: null,
       artistName: '',
       artistImage: '',
+      poolId: '',
+      poolTracks: [],
       isHost: false,
       isReady: false,
       opponentReady: false,
+      creatingRoom: false,
+      joiningRoom: false,
+      roomError: null,
     }),
+
+  // Reload a room's pool by id (useful on rematch / reconnect)
+  loadPoolById: async (poolId: string) => {
+    const result = await loadPool(poolId);
+    if ('error' in result) return null;
+    set({
+      artistName: result.artist.name,
+      artistImage: result.artist.image,
+      poolTracks: result.tracks,
+    });
+    return result;
+  },
 }));
