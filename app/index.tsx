@@ -13,7 +13,7 @@ export default function EntryScreen() {
     return (
       <View style={styles.loadingContainer}>
         <AlbumCollageBackground />
-        <ActivityIndicator size="large" color="#ffc98a" style={{ zIndex: 10 }} />
+        <ActivityIndicator size="large" color="#ffffff" style={{ zIndex: 10 }} />
       </View>
     );
   }

@@ -39,7 +39,7 @@ export default function CallbackScreen() {
 
   return (
     <View style={styles.container}>
-      <ActivityIndicator size="large" color="#ffc98a" />
+      <ActivityIndicator size="large" color="#ffffff" />
       <Text style={styles.text}>Completing sign in...</Text>
     </View>
   );

@@ -67,7 +67,7 @@ export default function LoginScreen() {
                 <ActivityIndicator color="#ffffff" size="small" style={{ marginRight: 8 }} />
               ) : (
                 <View style={styles.googleIconContainer}>
-                  <Ionicons name="logo-google" size={20} color="#ffc98a" />
+                  <Ionicons name="logo-google" size={20} color="#ffffff" />
                 </View>
               )}
               <Text style={styles.googleButtonText} numberOfLines={1}>
@@ -105,7 +105,7 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     textAlign: 'center',
     lineHeight: TITLE_FONT_SIZE * 1.12,
-    textShadowColor: 'rgba(232, 169, 92, 0.5)',
+    textShadowColor: 'rgba(255, 255, 255, 0.35)',
     textShadowOffset: { width: 0, height: 4 },
     textShadowRadius: 16,
   },
@@ -121,12 +121,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(26, 13, 5, 0.85)',
+    backgroundColor: 'rgba(20, 20, 20, 0.85)',
     borderWidth: 1.5,
-    borderColor: 'rgba(255, 190, 110, 0.35)',
+    borderColor: 'rgba(255, 255, 255, 0.35)',
     borderRadius: BorderRadius.full,
     paddingHorizontal: 24,
-    shadowColor: '#e8a95c',
+    shadowColor: '#ffffff',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 12,
@@ -134,8 +134,8 @@ const styles = StyleSheet.create({
   },
   buttonPressed: {
     transform: [{ scale: 0.98 }],
-    borderColor: 'rgba(255, 190, 110, 0.6)',
-    backgroundColor: 'rgba(40, 20, 8, 0.95)',
+    borderColor: 'rgba(255, 255, 255, 0.6)',
+    backgroundColor: 'rgba(40, 40, 40, 0.95)',
   },
   buttonDisabled: {
     opacity: 0.7,

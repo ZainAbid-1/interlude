@@ -43,8 +43,8 @@ const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const LOGO_FONT_SIZE = Math.min(48, SCREEN_WIDTH * 0.13);
 const LOGO_TEXT_HEIGHT = Math.min(52, SCREEN_WIDTH * 0.14);
 
-const WARM_GOLD = '#e8a95c';
-const WARM_GOLD_BRIGHT = '#ffc98a';
+const WARM_GOLD = '#ffffff';
+const WARM_GOLD_BRIGHT = '#e6e6e6';
 
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
@@ -419,7 +419,7 @@ export default function HomeScreen() {
                     (creatingRoom || !roomCode) && styles.buttonMuted,
                   ]}
                 >
-                  <Ionicons name="share-outline" size={16} color="#241505" />
+                  <Ionicons name="share-outline" size={16} color="#ffffff" />
                   <Text style={styles.shareButtonText}>Share Invite</Text>
                 </Pressable>
                 <Pressable
@@ -431,11 +431,11 @@ export default function HomeScreen() {
                   disabled={!chosenArtist || creatingRoom}
                 >
                   {creatingRoom ? (
-                    <ActivityIndicator size="small" color="#241505" />
+                    <ActivityIndicator size="small" color="#000000" />
                   ) : (
                     <>
                       <Text style={styles.startButtonText}>Start Game</Text>
-                      <Ionicons name="arrow-forward" size={16} color="#241505" />
+                      <Ionicons name="arrow-forward" size={16} color="#000000" />
                     </>
                   )}
                 </Pressable>
@@ -517,10 +517,10 @@ function FloatingParticles() {
       delay: i * 400,
       duration: 3000 + (i % 4) * 1000,
       color: i % 3 === 0
-        ? 'rgba(255, 186, 102, 0.35)'
+        ? 'rgba(255, 255, 255, 0.35)'
         : i % 3 === 1
-          ? 'rgba(255, 140, 60, 0.3)'
-          : 'rgba(255, 206, 132, 0.3)',
+          ? 'rgba(200, 200, 200, 0.3)'
+          : 'rgba(255, 255, 255, 0.3)',
     }));
   }, []);
 
@@ -643,7 +643,7 @@ function AuthPill() {
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: '#140b04',
+    backgroundColor: '#0a0a0a',
   },
   scroll: {
     flex: 1,
@@ -669,9 +669,9 @@ const styles = StyleSheet.create({
     gap: 6,
     height: 32,
     maxWidth: 140,
-    backgroundColor: 'rgba(30, 14, 5, 0.7)',
+    backgroundColor: 'rgba(24, 24, 24, 0.7)',
     borderWidth: 1,
-    borderColor: 'rgba(255, 190, 110, 0.28)',
+    borderColor: 'rgba(255, 255, 255, 0.28)',
     borderRadius: BorderRadius.full,
     paddingHorizontal: 10,
     marginLeft: 8,
@@ -680,7 +680,7 @@ const styles = StyleSheet.create({
     width: 22,
     height: 22,
     borderRadius: 11,
-    backgroundColor: 'rgba(255, 190, 110, 0.14)',
+    backgroundColor: 'rgba(255, 255, 255, 0.14)',
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'hidden',
@@ -701,7 +701,7 @@ const styles = StyleSheet.create({
     letterSpacing: 2,
     textTransform: 'uppercase',
     lineHeight: LOGO_TEXT_HEIGHT,
-    textShadowColor: 'rgba(30, 10, 2, 0.95)',
+    textShadowColor: 'rgba(0, 0, 0, 0.95)',
     textShadowOffset: { width: 0, height: 2 },
     textShadowRadius: 8,
     flexShrink: 1,
@@ -713,7 +713,7 @@ const styles = StyleSheet.create({
     marginTop: 4,
     letterSpacing: 0.3,
     opacity: 0.95,
-    textShadowColor: 'rgba(30, 10, 2, 0.95)',
+    textShadowColor: 'rgba(0, 0, 0, 0.95)',
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 6,
   },
@@ -799,7 +799,7 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.md,
   },
   resultRowActive: {
-    backgroundColor: 'rgba(255, 190, 110, 0.1)',
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
   },
   resultImage: {
     width: 42,
@@ -832,10 +832,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.sm,
-    backgroundColor: 'rgba(255, 190, 110, 0.08)',
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
     borderRadius: BorderRadius.lg,
     borderWidth: 1,
-    borderColor: 'rgba(255, 190, 110, 0.2)',
+    borderColor: 'rgba(255, 255, 255, 0.2)',
     paddingVertical: Spacing.sm,
     paddingHorizontal: Spacing.sm,
     marginBottom: Spacing.md,
@@ -869,10 +869,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.sm,
-    backgroundColor: 'rgba(255, 190, 110, 0.06)',
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
     borderRadius: BorderRadius.lg,
     borderWidth: 1,
-    borderColor: 'rgba(255, 190, 110, 0.18)',
+    borderColor: 'rgba(255, 255, 255, 0.18)',
     borderStyle: 'dashed',
     paddingVertical: Spacing.sm,
     paddingHorizontal: Spacing.sm,
@@ -882,7 +882,7 @@ const styles = StyleSheet.create({
     width: 54,
     height: 54,
     borderRadius: 27,
-    backgroundColor: 'rgba(255, 190, 110, 0.1)',
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -897,7 +897,7 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
     alignItems: 'center',
     gap: 5,
-    backgroundColor: 'rgba(255, 190, 110, 0.16)',
+    backgroundColor: 'rgba(255, 255, 255, 0.16)',
     borderRadius: BorderRadius.full,
     paddingHorizontal: 14,
     paddingVertical: 9,
@@ -923,7 +923,7 @@ const styles = StyleSheet.create({
     height: 40,
     borderRadius: 20,
     borderWidth: 1,
-    borderColor: 'rgba(255, 190, 110, 0.3)',
+    borderColor: 'rgba(255, 255, 255, 0.3)',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -944,10 +944,10 @@ const styles = StyleSheet.create({
   linkRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(255, 190, 110, 0.08)',
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
     borderRadius: BorderRadius.md,
     borderWidth: 1,
-    borderColor: 'rgba(255, 190, 110, 0.2)',
+    borderColor: 'rgba(255, 255, 255, 0.2)',
     paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.sm,
     marginBottom: Spacing.lg,
@@ -987,7 +987,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: Spacing.xs,
-    backgroundColor: 'rgba(255, 190, 110, 0.18)',
+    backgroundColor: 'rgba(255, 255, 255, 0.18)',
     borderRadius: BorderRadius.lg,
     paddingVertical: 14,
   },
@@ -1009,7 +1009,7 @@ const styles = StyleSheet.create({
   startButtonText: {
     fontFamily: 'Inter-Bold',
     fontSize: 15,
-    color: '#241505',
+    color: '#000000',
   },
   startButtonDisabled: {
     opacity: 0.35,

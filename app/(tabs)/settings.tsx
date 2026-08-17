@@ -17,7 +17,7 @@ import { useAuthStore } from '../../store/authStore';
 import { GlassCard } from '../../components/GlassCard';
 import { AlbumCollageBackground } from '../../components/AlbumCollageBackground';
 
-const WARM_GOLD = '#ffc98a';
+const WARM_GOLD = '#ffffff';
 
 export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
@@ -194,15 +194,15 @@ const styles = StyleSheet.create({
     height: 52,
     borderRadius: 26,
     borderWidth: 1.5,
-    borderColor: 'rgba(255, 190, 110, 0.4)',
+    borderColor: 'rgba(255, 255, 255, 0.4)',
   },
   avatarFallback: {
     width: 52,
     height: 52,
     borderRadius: 26,
-    backgroundColor: 'rgba(255, 190, 110, 0.12)',
+    backgroundColor: 'rgba(255, 255, 255, 0.12)',
     borderWidth: 1.5,
-    borderColor: 'rgba(255, 190, 110, 0.3)',
+    borderColor: 'rgba(255, 255, 255, 0.3)',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -223,12 +223,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: 'rgba(255, 190, 110, 0.1)',
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: BorderRadius.full,
     borderWidth: 1,
-    borderColor: 'rgba(255, 190, 110, 0.2)',
+    borderColor: 'rgba(255, 255, 255, 0.2)',
   },
   badgeText: {
     fontFamily: 'Inter',
@@ -267,7 +267,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: 'rgba(26, 13, 5, 0.85)',
     borderWidth: 1.5,
-    borderColor: 'rgba(255, 190, 110, 0.35)',
+    borderColor: 'rgba(255, 255, 255, 0.35)',
     borderRadius: BorderRadius.full,
   },
   loginInner: {

@@ -183,9 +183,9 @@ export function AlbumCollageBackground() {
 
   return (
     <View style={styles.container} pointerEvents="none">
-      {/* Base warm dark gradient */}
+      {/* Base dark gradient */}
       <LinearGradient
-        colors={['#1a0d05', '#120a06', '#200f05', '#0e0703']}
+        colors={['#0e0e0e', '#0a0a0a', '#131313', '#050505']}
         locations={[0, 0.3, 0.6, 1]}
         style={StyleSheet.absoluteFill}
       />
@@ -202,7 +202,7 @@ export function AlbumCollageBackground() {
         ))}
       </Animated.View>
 
-      {/* Color mood overlays */}
+      {/* Neutral light overlays */}
       <View style={styles.goldGlow1} />
       <View style={styles.amberGlow} />
       <View style={styles.emberGlow} />
@@ -211,10 +211,10 @@ export function AlbumCollageBackground() {
       {/* Dark vignette overlays for readability */}
       <LinearGradient
         colors={[
-          'rgba(14, 7, 3, 0.35)',
-          'rgba(16, 8, 3, 0.6)',
-          'rgba(12, 6, 2, 0.85)',
-          'rgba(8, 4, 2, 0.97)',
+          'rgba(0, 0, 0, 0.35)',
+          'rgba(0, 0, 0, 0.6)',
+          'rgba(0, 0, 0, 0.85)',
+          'rgba(0, 0, 0, 0.97)',
         ]}
         locations={[0, 0.25, 0.6, 1]}
         style={StyleSheet.absoluteFill}
@@ -222,7 +222,7 @@ export function AlbumCollageBackground() {
 
       {/* Top fade for status bar */}
       <LinearGradient
-        colors={['rgba(10, 5, 2, 0.96)', 'rgba(14, 7, 3, 0.4)', 'transparent']}
+        colors={['rgba(0, 0, 0, 0.96)', 'rgba(0, 0, 0, 0.4)', 'transparent']}
         locations={[0, 0.4, 1]}
         style={styles.topFade}
       />
@@ -242,12 +242,12 @@ const styles = StyleSheet.create({
     position: 'absolute',
     borderRadius: 10,
     overflow: 'hidden',
-    backgroundColor: 'rgba(30, 14, 5, 0.5)',
+    backgroundColor: 'rgba(20, 20, 20, 0.5)',
     // Border instead of elevation/shadow: shadows on animated views force
     // Android to re-rasterize a hardware layer every frame (a major jank
     // source), and on iOS they are clipped by `overflow: hidden` anyway.
     borderWidth: 1,
-    borderColor: 'rgba(255, 190, 110, 0.18)',
+    borderColor: 'rgba(255, 255, 255, 0.18)',
   },
   albumImage: {
     width: '100%',
@@ -292,7 +292,7 @@ const styles = StyleSheet.create({
     width: 300,
     height: 300,
     borderRadius: 150,
-    backgroundColor: 'rgba(255, 176, 92, 0.1)',
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
   },
   amberGlow: {
     position: 'absolute',
@@ -301,7 +301,7 @@ const styles = StyleSheet.create({
     width: 350,
     height: 350,
     borderRadius: 175,
-    backgroundColor: 'rgba(224, 124, 48, 0.07)',
+    backgroundColor: 'rgba(255, 255, 255, 0.04)',
   },
   emberGlow: {
     position: 'absolute',
@@ -310,7 +310,7 @@ const styles = StyleSheet.create({
     width: 200,
     height: 200,
     borderRadius: 100,
-    backgroundColor: 'rgba(255, 196, 120, 0.06)',
+    backgroundColor: 'rgba(255, 255, 255, 0.03)',
   },
   bronzeGlow: {
     position: 'absolute',
@@ -319,7 +319,7 @@ const styles = StyleSheet.create({
     width: 250,
     height: 250,
     borderRadius: 125,
-    backgroundColor: 'rgba(164, 92, 40, 0.06)',
+    backgroundColor: 'rgba(255, 255, 255, 0.03)',
   },
   topFade: {
     position: 'absolute',
