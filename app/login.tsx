@@ -6,6 +6,7 @@ import {
   StyleSheet,
   ActivityIndicator,
   Alert,
+  Dimensions,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import Animated, { FadeInDown, FadeInUp } from 'react-native-reanimated';
@@ -13,6 +14,11 @@ import { Ionicons } from '@expo/vector-icons';
 import { AlbumCollageBackground } from '../components/AlbumCollageBackground';
 import { useAuthStore } from '../store/authStore';
 import { Colors, Spacing, BorderRadius } from '../constants/theme';
+
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
+// Scale the wordmark so "INTERLUDE." always fits in full on small screens.
+const TITLE_FONT_SIZE = Math.min(58, SCREEN_WIDTH * 0.14);
+const TITLE_LETTER_SPACING = Math.min(6, SCREEN_WIDTH * 0.012);
 
 export default function LoginScreen() {
   const router = useRouter();
@@ -93,12 +99,12 @@ const styles = StyleSheet.create({
   },
   title: {
     fontFamily: 'Antonio',
-    fontSize: 58,
+    fontSize: TITLE_FONT_SIZE,
     color: '#ffffff',
-    letterSpacing: 6,
+    letterSpacing: TITLE_LETTER_SPACING,
     textTransform: 'uppercase',
     textAlign: 'center',
-    lineHeight: 64,
+    lineHeight: TITLE_FONT_SIZE * 1.12,
     textShadowColor: 'rgba(232, 169, 92, 0.5)',
     textShadowOffset: { width: 0, height: 4 },
     textShadowRadius: 16,

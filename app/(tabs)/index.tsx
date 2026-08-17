@@ -39,6 +39,9 @@ import { useRoomStore } from '../../store/roomStore';
 import { Colors, Spacing, BorderRadius } from '../../constants/theme';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
+// Scale the wordmark so "INTERLUDE." always fits in full on small screens.
+const LOGO_FONT_SIZE = Math.min(48, SCREEN_WIDTH * 0.13);
+const LOGO_TEXT_HEIGHT = Math.min(52, SCREEN_WIDTH * 0.14);
 
 const WARM_GOLD = '#e8a95c';
 const WARM_GOLD_BRIGHT = '#ffc98a';
@@ -693,11 +696,11 @@ const styles = StyleSheet.create({
   },
   logoText: {
     fontFamily: 'Antonio',
-    fontSize: 48,
+    fontSize: LOGO_FONT_SIZE,
     color: '#ffffff',
     letterSpacing: 2,
     textTransform: 'uppercase',
-    lineHeight: 52,
+    lineHeight: LOGO_TEXT_HEIGHT,
     textShadowColor: 'rgba(30, 10, 2, 0.95)',
     textShadowOffset: { width: 0, height: 2 },
     textShadowRadius: 8,

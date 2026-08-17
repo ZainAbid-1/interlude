@@ -36,6 +36,8 @@ export interface RoomWithPool {
   room: RoomRecord;
   artist: SpotifyArtist;
   tracks: RoomPoolTrack[];
+  /** Same-artist track names for answer distractors (wider catalog). */
+  options: string[];
 }
 
 function toArtist(pool: any): SpotifyArtist {
@@ -47,13 +49,15 @@ function toArtist(pool: any): SpotifyArtist {
 }
 
 /**
- * Persists a generated track pool and its 10 tracks to Supabase.
+ * Persists a generated track pool, its 10 tracks, and the artist's wider
+ * catalog (option names used as answer distractors) to Supabase.
  * The "3-second clip" is stored as { preview_url, clip_start_ms } per track —
  * the client seeks to clip_start_ms and plays 3s on demand.
  */
 export async function saveTrackPool(
   artist: SpotifyArtist,
-  tracks: TrackPoolItem[]
+  tracks: TrackPoolItem[],
+  optionNames: string[] = []
 ): Promise<{ poolId: string } | { error: string }> {
   if (!supabase) return { error: 'Supabase is not configured' };
 
@@ -85,6 +89,28 @@ export async function saveTrackPool(
 
   const { error: tracksErr } = await supabase.from('track_pool_tracks').insert(rows);
   if (tracksErr) return { error: tracksErr.message };
+
+  // Best-effort: rooms created against an older schema (no track_pool_options
+  // table yet) still work — the round generator falls back to in-pool options.
+  if (optionNames.length > 0) {
+    const uniq = optionNames.filter(
+      (n, i, all) => !!n && all.indexOf(n) === i
+    );
+    try {
+      const { error: optsErr } = await supabase.from('track_pool_options').insert(
+        uniq.map((name, i) => ({
+          track_pool_id: pool.id,
+          position: i + 1,
+          track_name: name,
+        }))
+      );
+      if (optsErr) {
+        console.warn('[rooms] track_pool_options insert failed', optsErr.message);
+      }
+    } catch (e) {
+      console.warn('[rooms] track_pool_options unavailable — using in-pool options', e);
+    }
+  }
 
   return { poolId: pool.id };
 }
@@ -166,16 +192,20 @@ export async function joinRoom(
     room: room as RoomRecord,
     artist: poolResult.artist,
     tracks: poolResult.tracks,
+    options: poolResult.options,
   };
 }
 
 /**
- * Fetches a pool's artist + tracks. Used by the host after creation and the
- * guest after joining.
+ * Fetches a pool's artist, tracks, and option-name catalog. Used by the host
+ * after creation and the guest after joining. Tolerates a missing
+ * `track_pool_options` table (older installs) by returning an empty list.
  */
 export async function loadPool(
   poolId: string
-): Promise<{ artist: SpotifyArtist; tracks: RoomPoolTrack[] } | { error: string }> {
+): Promise<
+  { artist: SpotifyArtist; tracks: RoomPoolTrack[]; options: string[] } | { error: string }
+> {
   if (!supabase) return { error: 'Supabase is not configured' };
 
   const { data: pool, error: poolErr } = await supabase
@@ -193,8 +223,23 @@ export async function loadPool(
     .order('position', { ascending: true });
   if (tracksErr) return { error: tracksErr.message };
 
+  let options: string[] = [];
+  try {
+    const { data: optData, error: optErr } = await supabase
+      .from('track_pool_options')
+      .select('track_name')
+      .eq('track_pool_id', poolId)
+      .order('position', { ascending: true });
+    if (!optErr && optData) {
+      options = (optData as { track_name: string }[]).map((o) => o.track_name);
+    }
+  } catch (e) {
+    // older schema without track_pool_options → in-pool options only
+  }
+
   return {
     artist: toArtist(pool),
     tracks: (tracks ?? []) as RoomPoolTrack[],
+    options,
   };
 }

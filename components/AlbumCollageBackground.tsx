@@ -1,5 +1,11 @@
-import React, { useEffect, useMemo } from 'react';
-import { View, Image, StyleSheet, Dimensions } from 'react-native';
+import React, { memo, useEffect, useMemo, useState } from 'react';
+import {
+  View,
+  Image,
+  StyleSheet,
+  AccessibilityInfo,
+  Platform,
+} from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import Animated, {
   useSharedValue,
@@ -8,11 +14,11 @@ import Animated, {
   withSequence,
   withTiming,
   withDelay,
+  cancelAnimation,
   Easing,
   interpolate,
 } from 'react-native-reanimated';
-
-const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
+import { useIsFocused } from '@react-navigation/native';
 
 // Album art images from Spotify CDN — diverse, colorful covers
 const ALBUM_COVERS = [
@@ -38,90 +44,61 @@ const ALBUM_COVERS = [
   'https://i.scdn.co/image/ab67616d0000b2734718e2b124f79258be7571c1', // Homework - Daft Punk
 ];
 
-// Card configuration for a scattered collage look
+// Warm the image cache once at module load so the covers are decoded on a
+// background thread before any screen mounts. Rendering then hits the cache and
+// never pops in — the #1 source of background jank was remote decode stutter.
+for (const url of ALBUM_COVERS) {
+  Image.prefetch(url).catch(() => {});
+}
+
+// Card configuration for a scattered collage look.
 interface CardConfig {
   x: number;
   y: number;
   rotation: number;
   scale: number;
   albumIndex: number;
-  animDelay: number;
-  driftX: number;
-  driftY: number;
-  driftDuration: number;
-}
-
-function generateCards(): CardConfig[] {
-  const cards: CardConfig[] = [
-    // Row 1 - top area
-    { x: -30, y: -40, rotation: -12, scale: 0.85, albumIndex: 0, animDelay: 0, driftX: 3, driftY: 4, driftDuration: 4000 },
-    { x: 200, y: -50, rotation: -5, scale: 0.9, albumIndex: 2, animDelay: 400, driftX: 4, driftY: -2, driftDuration: 3500 },
-    { x: 340, y: -30, rotation: 15, scale: 0.7, albumIndex: 3, animDelay: 100, driftX: -3, driftY: 5, driftDuration: 4500 },
-
-    // Row 2
-    { x: -20, y: 100, rotation: 6, scale: 0.78, albumIndex: 4, animDelay: 300, driftX: 2, driftY: -3, driftDuration: 5500 },
-    { x: 120, y: 110, rotation: -10, scale: 0.88, albumIndex: 5, animDelay: 500, driftX: -4, driftY: 2, driftDuration: 4200 },
-    { x: 280, y: 80, rotation: 12, scale: 0.82, albumIndex: 6, animDelay: 150, driftX: 3, driftY: -4, driftDuration: 3800 },
-
-    // Row 3
-    { x: -40, y: 240, rotation: -15, scale: 0.92, albumIndex: 8, animDelay: 250, driftX: 4, driftY: 2, driftDuration: 3200 },
-    { x: 100, y: 260, rotation: 5, scale: 0.72, albumIndex: 9, animDelay: 350, driftX: -3, driftY: -2, driftDuration: 5200 },
-    { x: 270, y: 220, rotation: -8, scale: 0.85, albumIndex: 10, animDelay: 700, driftX: 2, driftY: 4, driftDuration: 4600 },
-
-    // Row 4
-    { x: -10, y: 400, rotation: 9, scale: 0.8, albumIndex: 12, animDelay: 550, driftX: 3, driftY: -2, driftDuration: 4400 },
-    { x: 180, y: 380, rotation: -13, scale: 0.9, albumIndex: 13, animDelay: 100, driftX: -2, driftY: 4, driftDuration: 5100 },
-    { x: 320, y: 410, rotation: -11, scale: 0.83, albumIndex: 15, animDelay: 200, driftX: -3, driftY: 2, driftDuration: 4900 },
-
-    // Row 5
-    { x: -30, y: 540, rotation: -6, scale: 0.88, albumIndex: 16, animDelay: 400, driftX: 2, driftY: 3, driftDuration: 5300 },
-    { x: 230, y: 530, rotation: -9, scale: 0.82, albumIndex: 18, animDelay: 750, driftX: 3, driftY: 4, driftDuration: 4300 },
-  ];
-
-  return cards;
 }
 
 const CARD_SIZE = 120;
 
-function FloatingCard({ config }: { config: CardConfig }) {
-  const drift = useSharedValue(0);
+function generateCards(): CardConfig[] {
+  return [
+    // Row 1 - top area
+    { x: -25, y: -40, rotation: -12, scale: 0.85, albumIndex: 0 },
+    { x: 200, y: -50, rotation: -5, scale: 0.9, albumIndex: 2 },
+    { x: 340, y: -30, rotation: 15, scale: 0.72, albumIndex: 4 },
 
-  useEffect(() => {
-    drift.value = withDelay(
-      config.animDelay,
-      withRepeat(
-        withSequence(
-          withTiming(1, {
-            duration: config.driftDuration,
-            easing: Easing.inOut(Easing.sin),
-          }),
-          withTiming(0, {
-            duration: config.driftDuration,
-            easing: Easing.inOut(Easing.sin),
-          })
-        ),
-        -1,
-        true
-      )
-    );
-  }, []);
+    // Row 2
+    { x: -20, y: 120, rotation: 6, scale: 0.78, albumIndex: 6 },
+    { x: 150, y: 130, rotation: -9, scale: 0.88, albumIndex: 8 },
+    { x: 285, y: 90, rotation: 11, scale: 0.8, albumIndex: 10 },
 
-  const animatedStyle = useAnimatedStyle(() => {
-    const translateX = interpolate(drift.value, [0, 1], [0, config.driftX]);
-    const translateY = interpolate(drift.value, [0, 1], [0, config.driftY]);
+    // Row 3
+    { x: -30, y: 290, rotation: -14, scale: 0.9, albumIndex: 12 },
+    { x: 120, y: 300, rotation: 4, scale: 0.74, albumIndex: 14 },
+    { x: 275, y: 270, rotation: -7, scale: 0.84, albumIndex: 16 },
 
-    return {
-      transform: [
-        { translateX },
-        { translateY },
-        { rotate: `${config.rotation}deg` },
-        { scale: config.scale },
-      ],
-    };
-  });
+    // Row 4
+    { x: 40, y: 470, rotation: 8, scale: 0.8, albumIndex: 18 },
+    { x: 230, y: 455, rotation: -11, scale: 0.88, albumIndex: 3 },
+    { x: 330, y: 520, rotation: 12, scale: 0.7, albumIndex: 5 },
+  ];
+}
 
+/**
+ * A static album tile. Every per-card property (rotation/scale/position) is set
+ * once and never animated, so a card costs nothing per frame. The whole collage
+ * moves as a single layer instead (see AlbumCollageBackground), which is what
+ * keeps 12 covers on screen without burning the UI thread.
+ */
+const FloatingCard = memo(function FloatingCard({
+  config,
+}: {
+  config: CardConfig;
+}) {
   return (
-    <Animated.View
+    <View
       style={[
         styles.card,
         {
@@ -129,13 +106,20 @@ function FloatingCard({ config }: { config: CardConfig }) {
           top: config.y,
           width: CARD_SIZE,
           height: CARD_SIZE,
+          transform: [
+            { rotate: `${config.rotation}deg` },
+            { scale: config.scale },
+          ],
         },
-        animatedStyle,
       ]}
     >
       <Image
         source={{ uri: ALBUM_COVERS[config.albumIndex] }}
         style={styles.albumImage}
+        // Downscale at decode time on Android (iOS ignores this prop) so we
+        // don't hold 12 full-res 640x640 bitmaps in memory.
+        resizeMethod="resize"
+        fadeDuration={0}
       />
       {/* Mini player UI overlay */}
       <View style={styles.playerOverlay}>
@@ -144,12 +128,58 @@ function FloatingCard({ config }: { config: CardConfig }) {
           <View style={styles.playerProgressFill} />
         </View>
       </View>
-    </Animated.View>
+    </View>
   );
-}
+});
 
 export function AlbumCollageBackground() {
   const cards = useMemo(() => generateCards(), []);
+  const isFocused = useIsFocused();
+  const [reducedMotion, setReducedMotion] = useState(false);
+
+  useEffect(() => {
+    let mounted = true;
+    AccessibilityInfo.isReduceMotionEnabled().then((value) => {
+      if (mounted) setReducedMotion(value);
+    });
+    const subscription = AccessibilityInfo.addEventListener(
+      'reduceMotionChanged',
+      setReducedMotion
+    );
+    return () => {
+      mounted = false;
+      subscription.remove();
+    };
+  }, []);
+
+  // A single gentle drift applied to the ONE layer that holds every cover.
+  // One animation instead of N per-card animations = near-zero UI cost.
+  const drift = useSharedValue(0);
+
+  useEffect(() => {
+    if (!isFocused || reducedMotion) {
+      drift.value = 0;
+      cancelAnimation(drift);
+      return;
+    }
+    drift.value = withDelay(
+      300,
+      withRepeat(
+        withSequence(
+          withTiming(1, { duration: 9000, easing: Easing.inOut(Easing.sin) }),
+          withTiming(0, { duration: 9000, easing: Easing.inOut(Easing.sin) })
+        ),
+        -1,
+        true
+      )
+    );
+  }, [isFocused, reducedMotion, drift]);
+
+  const collageStyle = useAnimatedStyle(() => {
+    const translateX = interpolate(drift.value, [0, 1], [0, 10]);
+    const translateY = interpolate(drift.value, [0, 1], [0, 8]);
+    return { transform: [{ translateX }, { translateY }] };
+  });
 
   return (
     <View style={styles.container} pointerEvents="none">
@@ -160,12 +190,17 @@ export function AlbumCollageBackground() {
         style={StyleSheet.absoluteFill}
       />
 
-      {/* Album cards */}
-      <View style={styles.cardsContainer}>
+      {/* Album cards — one animated layer for the whole collage */}
+      <Animated.View
+        style={[styles.cardsContainer, collageStyle]}
+        // Composited once into a single hardware texture so moving it never
+        // re-rasterizes the 12 images underneath. Android only.
+        renderToHardwareTextureAndroid={Platform.OS === 'android'}
+      >
         {cards.map((config, index) => (
           <FloatingCard key={index} config={config} />
         ))}
-      </View>
+      </Animated.View>
 
       {/* Color mood overlays */}
       <View style={styles.goldGlow1} />
@@ -207,12 +242,12 @@ const styles = StyleSheet.create({
     position: 'absolute',
     borderRadius: 10,
     overflow: 'hidden',
-    // Subtle glow shadow
-    shadowColor: '#e8a24b',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 12,
-    elevation: 8,
+    backgroundColor: 'rgba(30, 14, 5, 0.5)',
+    // Border instead of elevation/shadow: shadows on animated views force
+    // Android to re-rasterize a hardware layer every frame (a major jank
+    // source), and on iOS they are clipped by `overflow: hidden` anyway.
+    borderWidth: 1,
+    borderColor: 'rgba(255, 190, 110, 0.18)',
   },
   albumImage: {
     width: '100%',

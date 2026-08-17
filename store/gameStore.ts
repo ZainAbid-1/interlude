@@ -187,7 +187,7 @@ export const useGameStore = create<GameState>((set, get) => ({
 
       const existing = await fetchRoundsForRoom(roomId);
       if (!existing || existing.length === 0) {
-        const gen = await generateRoundsForRoom(roomId, pool.tracks);
+        const gen = await generateRoundsForRoom(roomId, pool.tracks, pool.options);
         if (!gen.ok) return { ok: false, error: gen.error };
       }
 

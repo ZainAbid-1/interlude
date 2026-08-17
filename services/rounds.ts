@@ -22,44 +22,95 @@ export interface RoundAnswerRow {
 
 /**
  * Generates 10 rounds from a pool. Each round targets one pool track
- * (shuffled order so it's not 1..10), with 3 other pool tracks as distractors.
- * Options are shuffled so the correct answer isn't always first.
+ * (shuffled order so it's not 1..10). Distractors are DEALT from the artist's
+ * wider catalog (`optionNames`), never reusing a song already shown in an
+ * earlier round — so the answer grid is a fresh set every time instead of
+ * "guess which of the same few songs". Each option set is shuffled so the
+ * correct answer isn't always first.
  */
+function shuffle<T>(arr: T[]): T[] {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
 export function buildRounds(
-  poolTracks: RoomPoolTrack[]
+  poolTracks: RoomPoolTrack[],
+  optionNames: string[] = []
 ): Array<{
   track_pool_track_id: string;
   options: string[];
   correct_answer: string;
 }> {
-  const order = [...poolTracks].sort(() => Math.random() - 0.5);
-  const target = order[0];
+  // Catalog names are cleaned up front: drop blanks, duplicates, and any name
+  // that's already one of the 10 featured tracks (those must never be a
+  // distractor, or they'd give the correct answers away).
+  const poolNames = new Set(poolTracks.map((t) => t.track_name));
 
-  return poolTracks.map((track) => {
-    const distractors = poolTracks
-      .filter((t) => t.id !== track.id)
-      .sort(() => Math.random() - 0.5)
-      .slice(0, 3)
-      .map((t) => t.track_name);
+  const seen = new Set<string>();
+  const catalogNames: string[] = [];
+  for (const n of optionNames) {
+    const name = (n ?? '').trim();
+    if (!name || poolNames.has(name) || seen.has(name)) continue;
+    seen.add(name);
+    catalogNames.push(name);
+  }
+  const catalogDeck = shuffle(catalogNames);
 
-    return {
-      track_pool_track_id: track.id,
-      options: [track.track_name, ...distractors].sort(
-        () => Math.random() - 0.5
-      ),
-      correct_answer: track.track_name,
-    };
-  }).sort(() => Math.random() - 0.5);
+  // Fallback deck: the featured pool songs, reused only after the wider catalog
+  // has been fully dealt out (or on older pools without stored options).
+  const poolDeckNames = [...poolNames];
+  let poolDeck = shuffle(poolDeckNames);
+
+  // Draws a raw name from whichever deck still has cards. The catalog deck is
+  // dealt ONCE per game — a catalog song never repeats across rounds, so an
+  // option shown in round 3 cannot show up again in round 8.
+  const draw = (): string | null => {
+    if (catalogDeck.length > 0) return catalogDeck.shift()!;
+    if (poolDeck.length === 0) {
+      poolDeck = shuffle(poolDeckNames);
+    }
+    return poolDeck.shift() ?? null;
+  };
+
+  const buildDistractors = (targetName: string): string[] => {
+    const out: string[] = [];
+
+    // Draw 3 names, skipping the target (only reachable from the pool fallback,
+    // the catalog deck never contains pool names).
+    while (out.length < 3) {
+      const name = draw();
+      if (name == null) break;
+      if (name !== targetName && !out.includes(name)) out.push(name);
+    }
+
+    return out;
+  };
+
+  return poolTracks
+    .map((track) => {
+      const distractors = buildDistractors(track.track_name);
+      return {
+        track_pool_track_id: track.id,
+        options: shuffle([track.track_name, ...distractors]),
+        correct_answer: track.track_name,
+      };
+    })
+    .sort(() => Math.random() - 0.5);
 }
 
 /** Inserts the generated rounds for a room into the `rounds` table. */
 export async function generateRoundsForRoom(
   roomId: string,
-  poolTracks: RoomPoolTrack[]
+  poolTracks: RoomPoolTrack[],
+  optionNames: string[] = []
 ): Promise<{ ok: boolean; error?: string }> {
   if (!supabase) return { ok: false, error: 'Supabase is not configured' };
 
-  const rounds = buildRounds(poolTracks);
+  const rounds = buildRounds(poolTracks, optionNames);
   const rows = rounds.map((r, i) => ({
     room_id: roomId,
     round_index: i + 1,

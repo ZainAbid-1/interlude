@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { createAudioPlayer, setAudioModeAsync } from 'expo-audio';
-import type { AudioPlayer } from 'expo-audio';
+import type { AudioPlayer, AudioStatus } from 'expo-audio';
 
 export const CLIP_DURATION_MS = 3000;
 
@@ -14,6 +14,11 @@ const LOAD_TIMEOUT_MS = 10000;
  * `downloadFirst` fully buffers the remote MP3 (iTunes/Deezer previews) before
  * playback is allowed. This is what avoids the "silent no-op" where `play()`
  * is called on a not-yet-buffered player over a spotty mobile connection.
+ *
+ * `clipStarted` flips to `true` only when the player actually reports it is
+ * playing (a real `playbackStatusUpdate`), NOT when `playClip()` is called.
+ * Consumers use it to start progress/elapsed UI so the bar never runs ahead of
+ * the audible audio while the clip is still buffering.
  */
 export function useClipPlayback(previewUrl: string | null, startMs: number) {
   const playerRef = useRef<AudioPlayer | null>(null);
@@ -21,6 +26,8 @@ export function useClipPlayback(previewUrl: string | null, startMs: number) {
   const clipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const startMsRef = useRef(startMs);
   startMsRef.current = startMs;
+
+  const [clipStarted, setClipStarted] = useState(false);
 
   // Configure audio mode once. Must complete before playback starts so the
   // session is active (silent mode on iOS, no-ducking on Android).
@@ -43,29 +50,29 @@ export function useClipPlayback(previewUrl: string | null, startMs: number) {
       { downloadFirst: true, updateInterval: 100 }
     );
     player.volume = 1.0;
+    setClipStarted(false);
     playerRef.current = player;
+
+    // The player reports play/pause/position every `updateInterval` ms. We only
+    // care about the first transition into playing — that is the moment audio
+    // is truly audible, which is when the on-screen progress must begin.
+    const statusSub = player.addListener(
+      'playbackStatusUpdate',
+      (status: AudioStatus) => {
+        if (status.playing) {
+          setClipStarted(true);
+        }
+      }
+    );
+
     return () => {
+      statusSub.remove();
       stopClip();
       player.remove();
       playerRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [previewUrl]);
-
-  const stopClip = useCallback(() => {
-    if (loadTimerRef.current) {
-      clearInterval(loadTimerRef.current);
-      loadTimerRef.current = null;
-    }
-    if (clipTimerRef.current) {
-      clearTimeout(clipTimerRef.current);
-      clipTimerRef.current = null;
-    }
-    const player = playerRef.current;
-    if (player?.isLoaded) {
-      player.pause();
-    }
-  }, []);
 
   const startOnLoaded = useCallback((player: AudioPlayer) => {
     const start = () => {
@@ -127,14 +134,32 @@ export function useClipPlayback(previewUrl: string | null, startMs: number) {
     }, LOAD_POLL_MS);
   }, []);
 
+  const stopClip = useCallback(() => {
+    if (loadTimerRef.current) {
+      clearInterval(loadTimerRef.current);
+      loadTimerRef.current = null;
+    }
+    if (clipTimerRef.current) {
+      clearTimeout(clipTimerRef.current);
+      clipTimerRef.current = null;
+    }
+    const player = playerRef.current;
+    if (player?.isLoaded) {
+      player.pause();
+    }
+  }, []);
+
   const playClip = useCallback(() => {
     const player = playerRef.current;
     if (!player) {
       console.log('[useClipPlayback] playClip called but no player');
       return;
     }
+    // A fresh round always starts un-started so the progress bar begins at 0
+    // until the player actually reports playing.
+    setClipStarted(false);
     startOnLoaded(player);
   }, [startOnLoaded]);
 
-  return { playClip, stopClip };
+  return { playClip, stopClip, clipStarted };
 }

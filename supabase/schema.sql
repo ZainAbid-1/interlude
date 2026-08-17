@@ -37,6 +37,20 @@ create table if not exists public.track_pool_tracks (
   unique (track_pool_id, position)
 );
 
+-- Same-artist catalog used for answer distractors (rounds options). Kept
+-- separate from track_pool_tracks because those are capped at 10 (the playable
+-- rounds), while this table holds the wider catalog the wrong answers draw from.
+create table if not exists public.track_pool_options (
+  id            uuid primary key default gen_random_uuid(),
+  track_pool_id uuid not null references public.track_pools (id) on delete cascade,
+  position      int not null default 0,
+  track_name    text not null,
+  created_at    timestamptz not null default now(),
+  unique (track_pool_id, position)
+);
+
+create index track_pool_options_pool_idx on public.track_pool_options (track_pool_id);
+
 -- Rooms -----------------------------------------------------------------
 create table if not exists public.rooms (
   id                uuid primary key default gen_random_uuid(),
@@ -104,6 +118,7 @@ alter publication supabase_realtime add table public.round_answers;
 alter table public.profiles enable row level security;
 alter table public.track_pools enable row level security;
 alter table public.track_pool_tracks enable row level security;
+alter table public.track_pool_options enable row level security;
 alter table public.rooms enable row level security;
 alter table public.rounds enable row level security;
 alter table public.round_answers enable row level security;
@@ -115,6 +130,7 @@ create policy "own profile insert" on public.profiles for insert with check (aut
 
 create policy "open read"      on public.track_pools      for select using (true);
 create policy "open read"      on public.track_pool_tracks for select using (true);
+create policy "open read"      on public.track_pool_options for select using (true);
 create policy "open read"      on public.rooms            for select using (true);
 create policy "open read"      on public.rounds           for select using (true);
 create policy "open read"      on public.round_answers    for select using (true);
@@ -122,6 +138,7 @@ create policy "open read"      on public.match_results    for select using (true
 
 create policy "open insert" on public.track_pools       for insert with check (true);
 create policy "open insert" on public.track_pool_tracks for insert with check (true);
+create policy "open insert" on public.track_pool_options for insert with check (true);
 create policy "open insert" on public.rooms             for insert with check (true);
 create policy "open insert" on public.rounds            for insert with check (true);
 create policy "open insert" on public.round_answers     for insert with check (true);

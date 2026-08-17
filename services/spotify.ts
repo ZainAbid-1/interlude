@@ -460,24 +460,35 @@ function pickClipStart(durationMs: number): number {
  *
  * Candidates are shuffled before previews are resolved so the pool is a
  * varied slice of the catalog rather than the obvious top-10 hits.
+ *
+ * The same-artist tracks that DIDN'T make the playable pool are returned as
+ * `optionNames` — the answer distractors. Keeping them from the artist's own
+ * catalog (not the 10 featured songs) is what makes rounds unpredictable:
+ * you're guessing from real tracks, just not the ones already on screen.
  */
 export async function getArtistTrackPool(
   artistId: string,
   artistName: string,
   limit = 10
-): Promise<TrackPoolItem[]> {
-  if (!hasCredentials) return [];
+): Promise<ArtistTrackPool> {
+  if (!hasCredentials) return { tracks: [], optionNames: [] };
 
   try {
     const token = await getToken();
-    const candidates = shuffle(await collectCandidates(token, artistId, artistName, limit * 5));
-    const pool: TrackPoolItem[] = [];
+    // Fetch a wide slice of the catalog so we have plenty of same-artist names
+    // to draw alternatives from after the playable pool is filled.
+    const candidates = shuffle(
+      await collectCandidates(token, artistId, artistName, limit * 6)
+    );
+    const tracks: TrackPoolItem[] = [];
+    const chosen = new Set<string>();
 
     for (const track of candidates) {
-      if (pool.length >= limit) break;
+      if (tracks.length >= limit) break;
       const preview = await resolvePreview(artistName, track.name);
       if (!preview) continue;
-      pool.push({
+      chosen.add(track.id);
+      tracks.push({
         spotifyTrackId: track.id,
         trackName: track.name,
         albumArtUrl: track.albumArtUrl,
@@ -488,8 +499,20 @@ export async function getArtistTrackPool(
       });
     }
 
-    return pool;
+    const optionNames = candidates
+      .filter((t) => !chosen.has(t.id) && t.name)
+      .map((t) => t.name)
+      .filter((n, i, all) => all.indexOf(n) === i);
+
+    return { tracks, optionNames };
   } catch (e) {
-    return [];
+    return { tracks: [], optionNames: [] };
   }
+}
+
+export interface ArtistTrackPool {
+  /** The playable tracks featured in the game (have free previews). */
+  tracks: TrackPoolItem[];
+  /** Other same-artist track names, usable as answer distractors. */
+  optionNames: string[];
 }

@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { SpotifyArtist, TrackPoolItem } from '../services/spotify';
+import type { SpotifyArtist } from '../services/spotify';
 import { getArtistTrackPool } from '../services/spotify';
 import {
   saveTrackPool,
@@ -66,18 +66,19 @@ export const useRoomStore = create<RoomState>((set, get) => ({
 
     set({ creatingRoom: true, roomError: null });
 
-    // 1. Generate a varied 10-track pool with free previews
-    const pool: TrackPoolItem[] = await getArtistTrackPool(artist.id, artist.name, 10);
-    if (pool.length < 10) {
+    // 1. Generate a varied 10-track pool with free previews + a same-artist
+    //    catalog of alternative track names for answer options.
+    const pool = await getArtistTrackPool(artist.id, artist.name, 10);
+    if (pool.tracks.length < 10) {
       set({
         creatingRoom: false,
-        roomError: `Only ${pool.length}/10 tracks have playable previews. Try another artist.`,
+        roomError: `Only ${pool.tracks.length}/10 tracks have playable previews. Try another artist.`,
       });
       return { ok: false, error: 'Not enough previews for this artist' };
     }
 
-    // 2. Persist pool to Supabase
-    const saved = await saveTrackPool(artist, pool);
+    // 2. Persist pool + option catalog to Supabase
+    const saved = await saveTrackPool(artist, pool.tracks, pool.optionNames);
     if ('error' in saved) {
       set({ creatingRoom: false, roomError: saved.error });
       return { ok: false, error: saved.error };
@@ -99,7 +100,7 @@ export const useRoomStore = create<RoomState>((set, get) => ({
       artistName: artist.name,
       artistImage: artist.image,
       poolId: saved.poolId,
-      poolTracks: pool.map((t, i) => ({
+      poolTracks: pool.tracks.map((t, i) => ({
         id: '',
         position: i + 1,
         spotify_track_id: t.spotifyTrackId,
