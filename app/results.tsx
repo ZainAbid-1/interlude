@@ -36,8 +36,8 @@ export default function ResultsScreen() {
   const isDraw = playerScore === opponentScore;
 
   const handlePlayAgain = () => {
-    resetGame();
     router.replace('/');
+    setTimeout(resetGame, 300);
   };
 
   const outcomeEmoji = isDraw ? '🤝' : playerWins ? '🏆' : '😔';
@@ -108,7 +108,7 @@ export default function ResultsScreen() {
                   <View style={styles.roundRow}>
                     <View style={styles.roundLeft}>
                       <Text style={styles.roundIndex}>R{result.roundIndex}</Text>
-                      <View>
+                      <View style={{ flex: 1, paddingRight: 8 }}>
                         <Text style={styles.roundAnswer} numberOfLines={1}>
                           {result.playerAnswer || 'No answer'}
                         </Text>
@@ -156,7 +156,10 @@ export default function ResultsScreen() {
           </Pressable>
           <Pressable
             style={styles.secondaryButton}
-            onPress={() => router.replace('/')}
+            onPress={() => {
+              router.replace('/');
+              setTimeout(resetGame, 300);
+            }}
           >
             <Text style={styles.secondaryButtonText}>Back to Home</Text>
           </Pressable>

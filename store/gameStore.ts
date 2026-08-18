@@ -588,17 +588,14 @@ function beginRound(roundIndex: number, roundStartedAt: string | null) {
   clearTimers();
   clearAnswerPoll();
 
-  const startedAtMs = roundStartedAt
-    ? new Date(roundStartedAt).getTime()
-    : Date.now();
+  // Anchor timing to the local clock when the event is received.
+  // Using the server's `round_started_at` breaks horribly if device clocks are
+  // skewed (e.g. guest clock is 10s ahead, causing `startedAtMs` to be 10s in
+  // the past, which instantly fires the 8s timeout).
+  // Realtime events arrive quickly enough that both players will start roughly
+  // simultaneously.
   const now = Date.now();
-
-  // Anchor timing to the server's `round_started_at` so both players hit the
-  // same countdown → clip-start → guess-cutoff wall-clock times. `min` with
-  // `now` guards against device-clock skew: a client that observes the room
-  // from a "future" timestamp (its clock behind the host's) would otherwise
-  // wait far too long and look frozen on "3".
-  const roundStartMs = Math.min(startedAtMs, now) + COUNTDOWN_MS;
+  const roundStartMs = now + COUNTDOWN_MS;
   const roundBaseMs = roundStartMs - COUNTDOWN_MS;
   const until = (targetMs: number) => Math.max(0, targetMs - now);
 

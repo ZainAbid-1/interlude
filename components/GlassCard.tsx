@@ -41,7 +41,7 @@ export function GlassCard({
       />
       <View style={[styles.overlay, { borderRadius }]} />
       <View style={[styles.border, { borderRadius }]} />
-      <View style={{ padding }}>{children}</View>
+      <View style={[{ padding }, style && 'flex' in style ? { flex: (style as any).flex } : undefined]}>{children}</View>
     </View>
   );
 }

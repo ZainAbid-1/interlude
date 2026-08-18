@@ -7,6 +7,7 @@ import {
   Dimensions,
   Pressable,
   ActivityIndicator,
+  ScrollView,
 } from 'react-native';
 import { router } from 'expo-router';
 import Animated, {
@@ -250,7 +251,7 @@ export default function GameScreen() {
   return (
     <Animated.View
       entering={FadeIn.duration(350)}
-      style={[styles.screen, { paddingTop: insets.top }]}
+      style={[styles.screen, { paddingTop: insets.top, paddingBottom: insets.bottom }]}
     >
       {/* Countdown Overlay */}
       {roundState === 'countdown' && (
@@ -290,11 +291,13 @@ export default function GameScreen() {
       </Animated.View>
 
       {/* Main Content */}
-      <View style={styles.content}>
+      <View
+        style={[styles.content, styles.scrollContent]}
+      >
         <View style={styles.cardContainer}>
           {/* Artist Card */}
-          <Animated.View entering={FadeInDown.delay(300).duration(500)}>
-            <GlassCard borderRadius={24} padding={24}>
+          <Animated.View entering={FadeInDown.delay(300).duration(500)} style={{ flex: 1 }}>
+            <GlassCard borderRadius={24} padding={24} style={{ flex: 1 }}>
               {/* Album Art + Guess Timer overlay */}
               <View style={styles.albumArtContainer}>
                 {revealTrack && currentRound.track?.album_art_url ? (
@@ -594,17 +597,23 @@ const styles = StyleSheet.create({
   // Content
   content: {
     flex: 1,
+  },
+  scrollContent: {
+    flexGrow: 1,
     justifyContent: 'center',
     paddingHorizontal: Spacing.containerPadding,
+    paddingBottom: Spacing.lg,
   },
   cardContainer: {
     gap: Spacing.md,
+    flex: 1,
   },
 
   // Album Art
   albumArtContainer: {
     width: '100%',
-    aspectRatio: 1,
+    flex: 1,
+    minHeight: 120,
     borderRadius: BorderRadius.md,
     overflow: 'hidden',
     backgroundColor: Colors.surfaceContainerLow,
