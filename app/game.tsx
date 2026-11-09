@@ -26,7 +26,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { GlassCard } from '../components/GlassCard';
 import { AnswerButton } from '../components/AnswerButton';
 import { ProgressBar } from '../components/ProgressBar';
-import { useGameStore, ROUND_DURATION_MS } from '../store/gameStore';
+import { useGameStore, ROUND_DURATION_MS, getRoundStartAt } from '../store/gameStore';
 import { useRoomStore } from '../store/roomStore';
 import { useClipPlayback, CLIP_DURATION_MS } from '../hooks/useClipPlayback';
 import { Colors, Spacing, BorderRadius } from '../constants/theme';
@@ -67,7 +67,10 @@ export default function GameScreen() {
 
   const previewUrl = currentRound?.track?.preview_url ?? null;
   const clipStartMs = currentRound?.track?.clip_start_ms ?? 0;
-  const { playClip, stopClip, clipStarted } = useClipPlayback(previewUrl, clipStartMs);
+  const { playClip, stopClip, clipStarted, getClipSkipMs } = useClipPlayback(
+    previewUrl,
+    clipStartMs
+  );
 
   // `clipStarted` is the single source of truth for "audio is actually audible".
   // Everything that reflects the clip (progress bar + elapsed label) is anchored
@@ -88,9 +91,10 @@ export default function GameScreen() {
   // Record the wall-clock instant the clip genuinely starts, once per round.
   useEffect(() => {
     if (clipStarted && audioStartRef.current === null) {
-      audioStartRef.current = Date.now();
+      // If playback skipped ahead to stay in sync, start the bar part-way.
+      audioStartRef.current = Date.now() - getClipSkipMs();
     }
-  }, [clipStarted]);
+  }, [clipStarted, getClipSkipMs]);
 
   // The loader only spans the 3s clip; the trailing 5s is a separate timer.
   const isGuessPhase =
@@ -125,7 +129,8 @@ export default function GameScreen() {
   // Play the 3-second clip as soon as the round starts playing.
   useEffect(() => {
     if (roundState === 'playing') {
-      playClip();
+      // Aim at the shared, clock-synced start so both phones hear the same slice.
+      playClip(getRoundStartAt());
     } else {
       stopClip();
     }

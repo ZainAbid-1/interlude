@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 import type { RoomPoolTrack } from '../services/rooms';
 import { loadPool } from '../services/rooms';
+import { preloadClip, clearClips } from '../services/clipCache';
 import {
   fetchRoundsForRoom,
   generateRoundsForRoom,
@@ -76,7 +77,9 @@ interface GameState {
   error: string | null;
 
   // Actions
-  prepareMatch: (roomId: string) => Promise<{ ok: boolean; error?: string }>;
+  prepareMatch: (
+    roomId: string
+  ) => Promise<{ ok: boolean; error?: string; startAtHost?: number }>;
   initGame: (roomId: string, isHost: boolean) => Promise<{ ok: boolean; error?: string }>;
   submitAnswer: (answer: string) => Promise<void>;
   resetGame: () => void;
@@ -93,6 +96,20 @@ function calculatePoints(isCorrect: boolean, responseMs: number): number {
 }
 
 const roundStartRef = { at: 0 }; // Date.now() when the clip started playing
+
+/** Local-clock ms at which the current round's clip is meant to start — the
+ *  same instant on both phones thanks to the clock sync. */
+export function getRoundStartAt(): number {
+  return roundStartRef.at;
+}
+
+/** Buffers the clips for rounds `fromIndex`..`fromIndex + count - 1`. */
+function preloadRounds(fromIndex: number, count: number) {
+  const { rounds } = useGameStore.getState();
+  for (let i = fromIndex; i < fromIndex + count; i++) {
+    preloadClip(rounds.find((r) => r.roundIndex === i)?.track?.preview_url);
+  }
+}
 
 let timers: ReturnType<typeof setTimeout>[] = [];
 function clearTimers() {
@@ -128,12 +145,64 @@ function clearAnswerPoll() {
   answerPollTimer = null;
 }
 
-let roomChannel: RealtimeChannel | null = null;
-let answersChannel: RealtimeChannel | null = null;
+/**
+ * One Realtime channel per room carries everything time-critical:
+ *  - Broadcast messages sent phone-to-phone (no DB round trip): hello,
+ *    clock-sync ping/pong, round starts and answers.
+ *  - postgres_changes on the room row, kept as a backup signal.
+ * DB writes still happen for persistence/reconnects, and polling remains as a
+ * slow safety net, but neither is on the critical path any more.
+ */
+let gameChannel: RealtimeChannel | null = null;
+
+/** Head start given to a round so the broadcast reaches the guest before the
+ *  countdown begins on both phones. */
+const ROUND_LEAD_MS = 500;
+
+/**
+ * Clock sync. The host is the timekeeper; the guest estimates
+ * `hostClock - localClock` with NTP-style ping/pong over Broadcast and keeps
+ * the sample with the lowest round-trip (least network noise). Round start
+ * times are expressed in host-clock ms, so device clock skew no longer matters.
+ */
+let clockOffsetMs: number | null = null;
+let bestSyncRttMs = Infinity;
+
+/** Timing of the round currently on screen, so a precisely-synced start can
+ *  replace an earlier unsynced (fallback) start of the same round. */
+let roundTiming = { index: 0, synced: false, startAtLocal: 0 };
+
+/** Pool is loaded once per match and reused (it was refetched up to 3x). */
+type LoadedPool = Exclude<Awaited<ReturnType<typeof loadPool>>, { error: string }>;
+let poolCache: { id: string; pool: LoadedPool } | null = null;
+async function getPool(poolId: string): Promise<LoadedPool | { error: string }> {
+  if (poolCache?.id === poolId) return poolCache.pool;
+  const pool = await loadPool(poolId);
+  if (!('error' in pool)) poolCache = { id: poolId, pool };
+  return pool;
+}
+
+function teardownChannel() {
+  if (gameChannel) supabase?.removeChannel(gameChannel);
+  gameChannel = null;
+}
+
+function resetSyncState() {
+  clockOffsetMs = null;
+  bestSyncRttMs = Infinity;
+  roundTiming = { index: 0, synced: false, startAtLocal: 0 };
+  poolCache = null;
+  earlyAnswers.clear();
+  clearClips();
+}
 
 /** Coalesces concurrent `prepareMatch` calls (Realtime + polling) so the host
  *  only ever generates rounds / activates the room once. */
-let activationPromise: Promise<{ ok: boolean; error?: string }> | null = null;
+let activationPromise: Promise<{
+  ok: boolean;
+  error?: string;
+  startAtHost?: number;
+}> | null = null;
 
 export const useGameStore = create<GameState>((set, get) => ({
   roomId: '',
@@ -182,7 +251,7 @@ export const useGameStore = create<GameState>((set, get) => ({
         return { ok: false, error: 'Waiting for opponent to join...' };
       }
 
-      const pool = await loadPool(room.track_pool_id);
+      const pool = await getPool(room.track_pool_id);
       if ('error' in pool) return { ok: false, error: pool.error };
 
       const existing = await fetchRoundsForRoom(roomId);
@@ -191,18 +260,32 @@ export const useGameStore = create<GameState>((set, get) => ({
         if (!gen.ok) return { ok: false, error: gen.error };
       }
 
-      const { error } = await supabase
+      // Have the rounds in memory before picking the start time, so the only
+      // thing eating into the lead is the activation write itself.
+      if (get().rounds.length === 0) {
+        await loadRounds(roomId, room.track_pool_id);
+      }
+
+      // round_started_at is the moment the round-1 countdown begins, on the
+      // host's clock. The guest converts it with its clock offset, so even the
+      // DB/polling fallback path starts both phones together.
+      const startAtHost = Date.now() + ROUND_LEAD_MS;
+      const { data: activated, error } = await supabase
         .from('rooms')
         .update({
           status: 'active',
           current_round: 1,
-          round_started_at: new Date().toISOString(),
+          round_started_at: new Date(startAtHost).toISOString(),
         })
         .eq('id', roomId)
-        .eq('status', 'waiting'); // only the first activation wins
+        .eq('status', 'waiting') // only the first activation wins
+        .select('id');
       if (error) return { ok: false, error: error.message };
+      if (!activated || activated.length === 0) {
+        return { ok: false, error: 'Room already active' };
+      }
 
-      return { ok: true };
+      return { ok: true, startAtHost };
     })().finally(() => {
       activationPromise = null;
     });
@@ -216,10 +299,8 @@ export const useGameStore = create<GameState>((set, get) => ({
 
     clearTimers();
     clearPolling();
-    roomChannel?.unsubscribe();
-    answersChannel?.unsubscribe();
-    roomChannel = null;
-    answersChannel = null;
+    teardownChannel();
+    resetSyncState();
 
     const playerId = (await supabase.auth.getUser()).data.user?.id ?? '';
 
@@ -251,7 +332,7 @@ export const useGameStore = create<GameState>((set, get) => ({
       return { ok: false, error: 'Room not found' };
     }
 
-    const pool = await loadPool(room.track_pool_id);
+    const pool = await getPool(room.track_pool_id);
     if ('error' in pool) {
       set({ loading: false, error: pool.error });
       return { ok: false, error: pool.error };
@@ -266,8 +347,7 @@ export const useGameStore = create<GameState>((set, get) => ({
       opponentId: isHost ? room.guest_id : room.host_id,
     });
 
-    subscribeRoom(roomId);
-    subscribeAnswers();
+    subscribeGameChannel(roomId);
 
     await loadRoundsFromRoom(room);
 
@@ -296,6 +376,16 @@ export const useGameStore = create<GameState>((set, get) => ({
       roundState: 'answered',
     });
 
+    // Tell the opponent instantly, then persist. Resolution no longer waits
+    // on the DB insert (or on the opponent noticing it).
+    sendAnswer(round.id, state.playerId, answer, correct, points, responseMs);
+
+    if (get().opponentAnswered) {
+      resolveRound();
+    } else {
+      pollForOpponentAnswer(round.id);
+    }
+
     if (state.playerId && round.id) {
       await submitRoundAnswer(
         round.id,
@@ -306,22 +396,13 @@ export const useGameStore = create<GameState>((set, get) => ({
         points
       );
     }
-
-    // If opponent already answered, resolve immediately.
-    if (get().opponentAnswered) {
-      resolveRound();
-    } else {
-      pollForOpponentAnswer(round.id);
-    }
   },
 
   resetGame: () => {
     clearTimers();
     clearPolling();
-    roomChannel?.unsubscribe();
-    answersChannel?.unsubscribe();
-    roomChannel = null;
-    answersChannel = null;
+    teardownChannel();
+    resetSyncState();
     set({
       roomId: '',
       playerId: '',
@@ -377,7 +458,51 @@ async function maybeActivateHostRoom(room: any): Promise<boolean> {
   if (!s.isHost || !s.roomId) return false;
   if (room.status !== 'waiting' || !room.guest_id) return false;
   const res = await s.prepareMatch(s.roomId);
-  return res.ok;
+  if (!res.ok || res.startAtHost == null) return false;
+  // Kick off round 1 right now on both phones — don't wait for our own DB
+  // write to echo back through Realtime or the next poll tick.
+  startRoundAsHost(1, res.startAtHost);
+  return true;
+}
+
+/** Parses a `round_started_at` ISO string into host-clock ms. */
+function parseHostTime(iso: string | null | undefined): number | null {
+  if (!iso) return null;
+  const ms = Date.parse(iso);
+  return Number.isFinite(ms) ? ms : null;
+}
+
+/**
+ * Converts a host-clock start time into this phone's clock. Times that are
+ * already well past (a reconnect mid-match) or implausibly far ahead fall back
+ * to "start now", which is the old behaviour.
+ */
+function resolveStartLocal(startAtHost: number | null | undefined): {
+  at: number;
+  synced: boolean;
+} {
+  const now = Date.now();
+  if (startAtHost != null) {
+    const local = useGameStore.getState().isHost
+      ? startAtHost
+      : clockOffsetMs == null
+        ? null
+        : startAtHost - clockOffsetMs;
+    if (local != null && local > now - COUNTDOWN_MS && local < now + 5000) {
+      return { at: local, synced: true };
+    }
+  }
+  return { at: now, synced: false };
+}
+
+/** Host: announce a round to the guest over Broadcast and start it locally. */
+function startRoundAsHost(roundIndex: number, startAtHost: number) {
+  gameChannel?.send({
+    type: 'broadcast',
+    event: 'round',
+    payload: { roundIndex, startAtHost },
+  });
+  beginRound(roundIndex, startAtHost);
 }
 
 /**
@@ -390,8 +515,8 @@ async function processActiveRoom(room: any) {
   if (room.status !== 'active' || room.current_round < 1) return;
   if (s.rounds.length === 0) {
     await loadRoundsFromRoom(room);
-  } else if (s.currentRoundIndex < room.current_round) {
-    beginRound(room.current_round, room.round_started_at);
+  } else if (s.currentRoundIndex <= room.current_round) {
+    beginRound(room.current_round, parseHostTime(room.round_started_at));
   }
 }
 
@@ -461,9 +586,78 @@ function pollForOpponentAnswer(roundId: string) {
   }, POLL_ANSWER_MS);
 }
 
-function subscribeRoom(roomId: string) {
-  roomChannel = supabase!
-    .channel(`room:${roomId}`)
+/** Room-row changes, from postgres_changes or polling. */
+function onRoomRow(room: any) {
+  if (!room) return;
+  if (room.status === 'waiting') {
+    // Host auto-activates as soon as the guest joins the room.
+    maybeActivateHostRoom(room);
+    return;
+  }
+  if (room.status === 'completed') {
+    useGameStore.setState({ gameOver: true });
+    return;
+  }
+  processActiveRoom(room);
+}
+
+/**
+ * Subscribes to the room's single Realtime channel. Broadcast traffic goes
+ * phone-to-phone through the Realtime server without touching Postgres, so a
+ * message lands in roughly one network hop instead of
+ * write → WAL → postgres_changes → RLS check → client (or the next poll tick).
+ */
+function subscribeGameChannel(roomId: string) {
+  const ch = supabase!.channel(`game:${roomId}`, {
+    config: { broadcast: { self: false, ack: false } },
+  });
+  const isCurrent = () => gameChannel === ch;
+  const me = () => useGameStore.getState().playerId;
+
+  ch.on('broadcast', { event: 'hello' }, ({ payload }) => {
+    if (!isCurrent() || payload?.from === me()) return;
+    const s = useGameStore.getState();
+    // Answer a first hello so whoever subscribed first still hears from us.
+    if (!payload?.reply) sendHello(true);
+    if (s.isHost) {
+      // The guest is in the room — activate now rather than on the next poll.
+      fetchRoom(roomId).then((room) => room && onRoomRow(room));
+    } else {
+      runClockSync();
+    }
+  })
+    .on('broadcast', { event: 'ping' }, ({ payload }) => {
+      if (!isCurrent() || !useGameStore.getState().isHost) return;
+      ch.send({
+        type: 'broadcast',
+        event: 'pong',
+        payload: { t0: payload.t0, th: Date.now(), to: payload.from },
+      });
+    })
+    .on('broadcast', { event: 'pong' }, ({ payload }) => {
+      if (!isCurrent() || payload?.to !== me()) return;
+      const t1 = Date.now();
+      const rtt = t1 - payload.t0;
+      if (rtt >= 0 && rtt < bestSyncRttMs) {
+        bestSyncRttMs = rtt;
+        // Assume the pong was stamped halfway through the round trip.
+        clockOffsetMs = payload.th - (payload.t0 + rtt / 2);
+      }
+    })
+    .on('broadcast', { event: 'round' }, async ({ payload }) => {
+      if (!isCurrent()) return;
+      const s = useGameStore.getState();
+      if (s.isHost || s.gameOver) return;
+      if (s.rounds.length === 0) {
+        const poolId = poolCache?.id ?? (await fetchRoom(roomId))?.track_pool_id;
+        if (poolId) await loadRounds(roomId, poolId);
+      }
+      beginRound(payload.roundIndex, payload.startAtHost);
+    })
+    .on('broadcast', { event: 'answer' }, ({ payload }) => {
+      if (!isCurrent() || payload?.playerId === me()) return;
+      applyOpponentAnswer(payload.roundId, payload.correct === true, payload.points ?? 0);
+    })
     .on(
       'postgres_changes',
       {
@@ -473,39 +667,88 @@ function subscribeRoom(roomId: string) {
         filter: `id=eq.${roomId}`,
       },
       (payload) => {
-        const room = payload.new as any;
-        if (room.status === 'waiting') {
-          // Host auto-activates as soon as the guest joins the room.
-          maybeActivateHostRoom(room);
-          return;
-        }
-        if (room.status === 'active' && room.current_round >= 1) {
-          // Guest may not have rounds yet when the host activates the match.
-          const s = useGameStore.getState();
-          if (s.rounds.length === 0) {
-            loadRoundsFromRoom(room);
-          } else {
-            beginRound(room.current_round, room.round_started_at);
-          }
-        }
-        if (room.status === 'completed') {
-          useGameStore.setState({ gameOver: true });
-        }
+        if (isCurrent()) onRoomRow(payload.new);
       }
     )
-    .subscribe();
+    .subscribe((status) => {
+      if (!isCurrent() || status !== 'SUBSCRIBED') return;
+      sendHello(false);
+      if (useGameStore.getState().isHost) {
+        // The guest may have joined before we subscribed.
+        fetchRoom(roomId).then((room) => room && onRoomRow(room));
+      } else {
+        runClockSync();
+      }
+    });
+
+  gameChannel = ch;
 }
 
-/**
- * Loads a room's rounds + pool into the store. If the match is already
- * active, starts the current round immediately.
- */
-async function loadRoundsFromRoom(room: any) {
-  const state = useGameStore.getState();
-  const pool = await loadPool(room.track_pool_id);
-  if ('error' in pool) return;
+function sendHello(reply: boolean) {
+  gameChannel?.send({
+    type: 'broadcast',
+    event: 'hello',
+    payload: { from: useGameStore.getState().playerId, reply },
+  });
+}
 
-  const rounds = await fetchRoundsForRoom(room.id);
+/** Guest: a short burst of pings to the host; the best sample wins. */
+let syncing = false;
+function runClockSync() {
+  if (syncing || useGameStore.getState().isHost) return;
+  syncing = true;
+  const PINGS = 6;
+  for (let i = 0; i < PINGS; i++) {
+    setTimeout(() => {
+      gameChannel?.send({
+        type: 'broadcast',
+        event: 'ping',
+        payload: { t0: Date.now(), from: useGameStore.getState().playerId },
+      });
+      if (i === PINGS - 1) syncing = false;
+    }, i * 120);
+  }
+}
+
+function sendAnswer(
+  roundId: string,
+  playerId: string,
+  choice: string,
+  correct: boolean,
+  points: number,
+  responseMs: number
+) {
+  gameChannel?.send({
+    type: 'broadcast',
+    event: 'answer',
+    payload: { roundId, playerId, choice, correct, points, responseMs },
+  });
+}
+
+/** Opponent answers that arrived before this phone started that round. */
+const earlyAnswers = new Map<string, { correct: boolean; points: number }>();
+
+function applyOpponentAnswer(roundId: string, correct: boolean, points: number) {
+  const s = useGameStore.getState();
+  if (!s.currentRound || s.currentRound.id !== roundId) {
+    earlyAnswers.set(roundId, { correct, points });
+    return;
+  }
+  if (s.opponentAnswered) return;
+  useGameStore.setState({
+    opponentAnswered: true,
+    opponentRoundCorrect: correct,
+    opponentRoundPoints: points,
+  });
+  if (useGameStore.getState().myAnswered) resolveRound();
+}
+
+/** Loads a room's rounds into the store (pool comes from the cache). */
+async function loadRounds(roomId: string, poolId: string): Promise<boolean> {
+  const pool = await getPool(poolId);
+  if ('error' in pool) return false;
+
+  const rounds = await fetchRoundsForRoom(roomId);
   const trackById = new Map(pool.tracks.map((t) => [t.id, t]));
   const gameRounds: GameRound[] = (rounds ?? []).map((r) => ({
     id: r.id,
@@ -522,53 +765,30 @@ async function loadRoundsFromRoom(room: any) {
     rounds: gameRounds,
     loading: false,
   });
+  // Start buffering the opening clips now, well before round 1's countdown.
+  preloadRounds(Math.max(1, useGameStore.getState().currentRoundIndex), 3);
+  return gameRounds.length > 0;
+}
 
-  if (room.status === 'active' && room.current_round >= 1 && gameRounds.length > 0) {
+/**
+ * Loads a room's rounds + pool into the store. If the match is already
+ * active, starts the current round immediately.
+ */
+async function loadRoundsFromRoom(room: any) {
+  const loaded = await loadRounds(room.id, room.track_pool_id);
+  if (loaded && room.status === 'active' && room.current_round >= 1) {
     clearAnswerPoll();
-    beginRound(room.current_round, room.round_started_at);
+    beginRound(room.current_round, parseHostTime(room.round_started_at));
   }
 }
 
-function subscribeAnswers() {
-  answersChannel = supabase!
-    .channel('round-answers')
-    .on(
-      'postgres_changes',
-      { event: 'INSERT', schema: 'public', table: 'round_answers' },
-      (payload) => {
-        const answer = payload.new as any;
-        const state = useGameStore.getState();
-        if (!state.currentRound || answer.round_id !== state.currentRound.id) return;
-
-        if (answer.player_id === state.playerId) {
-          if (!state.myAnswered) {
-            useGameStore.setState({
-              myAnswered: true,
-              selectedAnswer: answer.choice,
-              isCorrect: answer.is_correct === true,
-              pointsAwarded: answer.points_awarded ?? 0,
-              responseTimeMs: answer.response_ms ?? 0,
-              roundState: 'answered',
-            });
-          }
-        } else {
-          useGameStore.setState({
-            opponentAnswered: true,
-            opponentRoundCorrect: answer.is_correct === true,
-            opponentRoundPoints: answer.points_awarded ?? 0,
-          });
-        }
-
-        const s = useGameStore.getState();
-        if (s.myAnswered && s.opponentAnswered) {
-          resolveRound();
-        }
-      }
-    )
-    .subscribe();
-}
-
-function beginRound(roundIndex: number, roundStartedAt: string | null) {
+/**
+ * Starts a round's countdown at `startAtHost` (host-clock ms). Both phones
+ * receive the same host timestamp and convert it with their clock offset, so
+ * the countdown, the clip and the answer timer line up across devices no
+ * matter which path (Broadcast, postgres_changes, polling) delivered it.
+ */
+function beginRound(roundIndex: number, startAtHost?: number | null) {
   const state = useGameStore.getState();
   if (roundIndex < 1 || roundIndex > state.totalRounds) return;
   if (state.rounds.length === 0) return;
@@ -576,34 +796,42 @@ function beginRound(roundIndex: number, roundStartedAt: string | null) {
   const round = state.rounds.find((r) => r.roundIndex === roundIndex);
   if (!round) return;
 
-  // Guard against double-starting the same round (initGame + realtime UPDATE).
-  if (
-    state.currentRoundIndex === roundIndex &&
-    state.roundState !== 'idle' &&
-    state.roundState !== 'result'
-  ) {
-    return;
+  const timing = resolveStartLocal(startAtHost);
+
+  // Never go backwards, and never restart a round already under way. The one
+  // exception: a precisely synced start may replace an unsynced fallback
+  // start while the countdown is still running.
+  if (roundIndex < state.currentRoundIndex) return;
+  if (roundIndex === state.currentRoundIndex && state.roundState !== 'idle') {
+    const upgrade =
+      state.roundState === 'countdown' &&
+      roundTiming.index === roundIndex &&
+      !roundTiming.synced &&
+      timing.synced &&
+      Math.abs(timing.at - roundTiming.startAtLocal) > 150;
+    if (!upgrade) return;
   }
 
   clearTimers();
   clearAnswerPoll();
+  roundTiming = { index: roundIndex, synced: timing.synced, startAtLocal: timing.at };
+  // Make sure this round's clip is buffering (no-op if preloaded) and keep the
+  // next two rounds downloading in the background.
+  preloadRounds(roundIndex, 3);
+  // Point the clip start at the shared time now, so playback can align to it.
+  roundStartRef.at = timing.at + COUNTDOWN_MS;
 
-  // Anchor timing to the local clock when the event is received.
-  // Using the server's `round_started_at` breaks horribly if device clocks are
-  // skewed (e.g. guest clock is 10s ahead, causing `startedAtMs` to be 10s in
-  // the past, which instantly fires the 8s timeout).
-  // Realtime events arrive quickly enough that both players will start roughly
-  // simultaneously.
   const now = Date.now();
-  const roundStartMs = now + COUNTDOWN_MS;
-  const roundBaseMs = roundStartMs - COUNTDOWN_MS;
+  const roundBaseMs = timing.at; // countdown begins
+  const roundStartMs = roundBaseMs + COUNTDOWN_MS; // clip + answer timer begin
   const until = (targetMs: number) => Math.max(0, targetMs - now);
+  const elapsed = now - roundBaseMs;
 
   useGameStore.setState({
     currentRoundIndex: roundIndex,
     currentRound: round,
     roundState: 'countdown',
-    countdownValue: 3,
+    countdownValue: elapsed >= 2000 ? 1 : elapsed >= 1000 ? 2 : 3,
     selectedAnswer: null,
     isCorrect: null,
     responseTimeMs: 0,
@@ -613,6 +841,12 @@ function beginRound(roundIndex: number, roundStartedAt: string | null) {
     myAnswered: false,
     opponentAnswered: false,
   });
+
+  const early = earlyAnswers.get(round.id);
+  if (early) {
+    earlyAnswers.delete(round.id);
+    applyOpponentAnswer(round.id, early.correct, early.points);
+  }
 
   // Seed answered state from DB (reconnect safety).
   seedRoundAnswers(round.id);
@@ -641,6 +875,9 @@ function beginRound(roundIndex: number, roundStartedAt: string | null) {
           responseTimeMs: ROUND_DURATION_MS,
           roundState: 'answered',
         });
+        if (s.currentRound?.id) {
+          sendAnswer(s.currentRound.id, s.playerId, '', false, 0, ROUND_DURATION_MS);
+        }
         if (s.playerId && s.currentRound?.id) {
           submitRoundAnswer(
             s.currentRound.id,
@@ -657,7 +894,9 @@ function beginRound(roundIndex: number, roundStartedAt: string | null) {
           pollForOpponentAnswer(s.currentRound.id);
         }
       }
-    }, until(roundStartMs + ROUND_DURATION_MS + 500));
+      // Measured from when this callback runs, not from beginRound's `now`
+      // (that made the safety timeout fire a full countdown late).
+    }, Math.max(0, roundStartMs + ROUND_DURATION_MS + 500 - Date.now()));
   }, until(roundStartMs));
 }
 
@@ -725,21 +964,27 @@ function resolveRound() {
     } else if (s.isHost) {
       advanceRoomRound();
     }
-    // Guest waits for host's rooms UPDATE via realtime.
+    // Guest waits for the host's 'round' broadcast (or the DB fallback).
   }, 2200);
 }
 
 async function advanceRoomRound() {
   const state = useGameStore.getState();
-  const next = state.currentRoundIndex + 1;
+  const current = state.currentRoundIndex;
+  const next = current + 1;
+  // Announce + start immediately on both phones; the DB write below is for
+  // persistence and the fallback path, and carries the same start time.
+  const startAtHost = Date.now() + ROUND_LEAD_MS;
+  startRoundAsHost(next, startAtHost);
+
   const { error } = await supabase!
     .from('rooms')
     .update({
       current_round: next,
-      round_started_at: new Date().toISOString(),
+      round_started_at: new Date(startAtHost).toISOString(),
     })
     .eq('id', state.roomId)
-    .eq('current_round', state.currentRoundIndex); // guard against double advance
+    .eq('current_round', current); // guard against double advance
   if (error) {
     console.warn('[game] advance failed', error.message);
   }

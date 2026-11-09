@@ -1,11 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { createAudioPlayer, setAudioModeAsync } from 'expo-audio';
+import { setAudioModeAsync } from 'expo-audio';
+import { createClipPlayer, takeClip } from '../services/clipCache';
 import type { AudioPlayer, AudioStatus } from 'expo-audio';
 
 export const CLIP_DURATION_MS = 3000;
 
 const LOAD_POLL_MS = 100;
 const LOAD_TIMEOUT_MS = 10000;
+/** Lateness below this is inaudible; above it we skip ahead to stay in sync. */
+const ALIGN_THRESHOLD_MS = 120;
+/** Always leave at least this much of the clip audible when skipping ahead. */
+const MIN_AUDIBLE_MS = 1000;
 
 /**
  * Plays a 3-second slice of a preview clip, seeking to `startMs`.
@@ -26,6 +31,10 @@ export function useClipPlayback(previewUrl: string | null, startMs: number) {
   const clipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const startMsRef = useRef(startMs);
   startMsRef.current = startMs;
+  /** Shared (clock-synced) instant the clip should start, if known. */
+  const targetStartRef = useRef<number | null>(null);
+  /** How far into the clip playback actually began, to keep the UI aligned. */
+  const clipSkipRef = useRef(0);
 
   const [clipStarted, setClipStarted] = useState(false);
 
@@ -45,11 +54,11 @@ export function useClipPlayback(previewUrl: string | null, startMs: number) {
       return;
     }
     console.log('[useClipPlayback] Creating player for:', previewUrl);
-    const player = createAudioPlayer(
-      { uri: previewUrl },
-      { downloadFirst: true, updateInterval: 100 }
-    );
-    player.volume = 1.0;
+    // Prefer the player the game store preloaded for this round (already
+    // buffered); otherwise create one now.
+    const preloaded = takeClip(previewUrl);
+    const player = preloaded ?? createClipPlayer(previewUrl);
+    console.log('[useClipPlayback] preloaded:', !!preloaded, 'loaded:', player.isLoaded);
     setClipStarted(false);
     playerRef.current = player;
 
@@ -76,6 +85,17 @@ export function useClipPlayback(previewUrl: string | null, startMs: number) {
 
   const startOnLoaded = useCallback((player: AudioPlayer) => {
     const start = () => {
+      // If this phone is late versus the shared start, skip ahead so both
+      // phones hear the same slice and stop together.
+      const target = targetStartRef.current;
+      const lateMs = target != null ? Date.now() - target : 0;
+      const skipMs =
+        lateMs > ALIGN_THRESHOLD_MS
+          ? Math.min(lateMs, CLIP_DURATION_MS - MIN_AUDIBLE_MS)
+          : 0;
+      clipSkipRef.current = skipMs;
+      const playForMs = CLIP_DURATION_MS - skipMs;
+
       let startSeconds = startMsRef.current / 1000;
 
       // Old pools can store a clip start computed against the FULL track
@@ -86,6 +106,7 @@ export function useClipPlayback(previewUrl: string | null, startMs: number) {
         const maxStart = Math.max(0, player.duration - CLIP_DURATION_MS / 1000 - 0.02);
         if (startSeconds > maxStart) startSeconds = maxStart;
       }
+      startSeconds += skipMs / 1000;
 
       player
         .seekTo(startSeconds)
@@ -95,11 +116,15 @@ export function useClipPlayback(previewUrl: string | null, startMs: number) {
           if (clipTimerRef.current) clearTimeout(clipTimerRef.current);
           clipTimerRef.current = setTimeout(() => {
             if (player.isLoaded) player.pause();
-          }, CLIP_DURATION_MS);
+          }, playForMs);
         })
         .catch((e) => {
           console.log('[useClipPlayback] seekTo failed, playing anyway:', e);
           player.play();
+          if (clipTimerRef.current) clearTimeout(clipTimerRef.current);
+          clipTimerRef.current = setTimeout(() => {
+            if (player.isLoaded) player.pause();
+          }, playForMs);
         });
     };
 
@@ -149,7 +174,13 @@ export function useClipPlayback(previewUrl: string | null, startMs: number) {
     }
   }, []);
 
-  const playClip = useCallback(() => {
+  /**
+   * Plays the clip. `targetStartAt` (local ms) is the shared instant the clip
+   * should begin on both phones; if we get there late, playback skips ahead.
+   */
+  const playClip = useCallback((targetStartAt?: number) => {
+    targetStartRef.current = targetStartAt ?? null;
+    clipSkipRef.current = 0;
     const player = playerRef.current;
     if (!player) {
       console.log('[useClipPlayback] playClip called but no player');
@@ -161,5 +192,7 @@ export function useClipPlayback(previewUrl: string | null, startMs: number) {
     startOnLoaded(player);
   }, [startOnLoaded]);
 
-  return { playClip, stopClip, clipStarted };
+  const getClipSkipMs = useCallback(() => clipSkipRef.current, []);
+
+  return { playClip, stopClip, clipStarted, getClipSkipMs };
 }
