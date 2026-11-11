@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabase';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 import type { RoomPoolTrack } from '../services/rooms';
 import { loadPool } from '../services/rooms';
-import { preloadClip, clearClips } from '../services/clipCache';
+import { preloadClip, preloadCover, clearClips } from '../services/clipCache';
 import {
   fetchRoundsForRoom,
   generateRoundsForRoom,
@@ -107,9 +107,31 @@ export function getRoundStartAt(): number {
 function preloadRounds(fromIndex: number, count: number) {
   const { rounds } = useGameStore.getState();
   for (let i = fromIndex; i < fromIndex + count; i++) {
-    preloadClip(rounds.find((r) => r.roundIndex === i)?.track?.preview_url);
+    const track = rounds.find((r) => r.roundIndex === i)?.track;
+    preloadClip(track?.preview_url);
+    preloadCover(track?.album_art_url);
   }
 }
+
+/** Minimum time the round result (and revealed cover) stays on screen. */
+const RESULT_MS = 2200;
+/** Longest extra wait for covers to finish loading before moving on. */
+const COVER_WAIT_MAX_MS = 3000;
+
+/** Host side: resolvers for the guest's "cover is showing" signal, per round. */
+const guestCoverReady = new Map<number, { promise: Promise<void>; resolve: () => void }>();
+function guestCoverSignal(roundIndex: number) {
+  let entry = guestCoverReady.get(roundIndex);
+  if (!entry) {
+    let resolve!: () => void;
+    const promise = new Promise<void>((r) => (resolve = r));
+    entry = { promise, resolve };
+    guestCoverReady.set(roundIndex, entry);
+  }
+  return entry;
+}
+
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 let timers: ReturnType<typeof setTimeout>[] = [];
 function clearTimers() {
@@ -193,6 +215,7 @@ function resetSyncState() {
   roundTiming = { index: 0, synced: false, startAtLocal: 0 };
   poolCache = null;
   earlyAnswers.clear();
+  guestCoverReady.clear();
   clearClips();
 }
 
@@ -654,6 +677,10 @@ function subscribeGameChannel(roomId: string) {
       }
       beginRound(payload.roundIndex, payload.startAtHost);
     })
+    .on('broadcast', { event: 'cover-ready' }, ({ payload }) => {
+      if (!isCurrent() || !useGameStore.getState().isHost) return;
+      guestCoverSignal(payload.roundIndex).resolve();
+    })
     .on('broadcast', { event: 'answer' }, ({ payload }) => {
       if (!isCurrent() || payload?.playerId === me()) return;
       applyOpponentAnswer(payload.roundId, payload.correct === true, payload.points ?? 0);
@@ -956,16 +983,42 @@ function resolveRound() {
 
   clearAnswerPoll();
 
-  // Auto-advance after result is shown.
-  later(() => {
+  // The cover is revealed now; make sure it has actually loaded before the
+  // match moves on. (Usually instant — it was prefetched rounds ago.)
+  const roundIndex = round.roundIndex;
+  const coverReady = preloadCover(round.track?.album_art_url).then(() => {});
+  if (!state.isHost) {
+    coverReady.then(() =>
+      gameChannel?.send({
+        type: 'broadcast',
+        event: 'cover-ready',
+        payload: { roundIndex },
+      })
+    );
+  }
+
+  // Auto-advance once the result has been up for RESULT_MS and the covers
+  // are showing (capped, so a broken image can never stall the match).
+  later(async () => {
     const s = useGameStore.getState();
-    if (s.currentRoundIndex >= s.totalRounds) {
+    const isLast = s.currentRoundIndex >= s.totalRounds;
+    const waits: Promise<void>[] = [coverReady];
+    if (s.isHost && !isLast) waits.push(guestCoverSignal(roundIndex).promise);
+    await Promise.race([Promise.all(waits), sleep(COVER_WAIT_MAX_MS)]);
+
+    const now = useGameStore.getState();
+    // Bail if the match was reset or already moved on while we waited.
+    if (now.gameOver || now.currentRoundIndex !== roundIndex || now.roundState !== 'result') {
+      return;
+    }
+    guestCoverReady.delete(roundIndex);
+    if (isLast) {
       finalizeMatch();
-    } else if (s.isHost) {
+    } else if (now.isHost) {
       advanceRoomRound();
     }
     // Guest waits for the host's 'round' broadcast (or the DB fallback).
-  }, 2200);
+  }, RESULT_MS);
 }
 
 async function advanceRoomRound() {

@@ -66,6 +66,12 @@ export default function GameScreen() {
     roundState === 'answered' || roundState === 'result';
 
   const previewUrl = currentRound?.track?.preview_url ?? null;
+  const coverUrl = currentRound?.track?.album_art_url ?? null;
+  // The cover fades in only once it has actually loaded; reset per round.
+  const [coverLoaded, setCoverLoaded] = useState(false);
+  useEffect(() => {
+    setCoverLoaded(false);
+  }, [coverUrl]);
   const clipStartMs = currentRound?.track?.clip_start_ms ?? 0;
   const { playClip, stopClip, clipStarted, getClipSkipMs } = useClipPlayback(
     previewUrl,
@@ -305,23 +311,29 @@ export default function GameScreen() {
             <GlassCard borderRadius={24} padding={24} style={{ flex: 1 }}>
               {/* Album Art + Guess Timer overlay */}
               <View style={styles.albumArtContainer}>
-                {revealTrack && currentRound.track?.album_art_url ? (
-                  <Image
-                    source={{ uri: currentRound.track.album_art_url }}
-                    style={styles.albumArt}
+                {/* Placeholder stays underneath so the box is never blank
+                    while the cover is still loading. */}
+                <View style={styles.albumArtPlaceholder}>
+                  <MaterialCommunityIcons
+                    name="music-note"
+                    size={48}
+                    color={Colors.textSubtle}
                   />
-                ) : (
-                  <View style={styles.albumArtPlaceholder}>
-                    <MaterialCommunityIcons
-                      name="music-note"
-                      size={48}
-                      color={Colors.textSubtle}
-                    />
-                    <Text style={styles.albumArtHint}>
-                      {revealTrack ? 'Guess the track' : 'Listen to the clip'}
-                    </Text>
-                  </View>
-                )}
+                  <Text style={styles.albumArtHint}>
+                    {!revealTrack
+                      ? 'Listen to the clip'
+                      : coverUrl
+                        ? 'Loading cover…'
+                        : 'Guess the track'}
+                  </Text>
+                </View>
+                {revealTrack && coverUrl ? (
+                  <Image
+                    source={{ uri: coverUrl }}
+                    style={[styles.albumArt, styles.albumArtOverlay, { opacity: coverLoaded ? 1 : 0 }]}
+                    onLoad={() => setCoverLoaded(true)}
+                  />
+                ) : null}
 
                 {/* Guess Timer — separate 5s countdown once the clip ends */}
                 {isGuessPhase && (
@@ -628,6 +640,11 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
     resizeMode: 'cover',
+  },
+  albumArtOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
   },
   albumArtPlaceholder: {
     flex: 1,

@@ -1,5 +1,31 @@
+import { Image } from 'react-native';
 import { createAudioPlayer } from 'expo-audio';
 import type { AudioPlayer } from 'expo-audio';
+
+/**
+ * Album-art prefetches, keyed by URL. The game screen only mounts the cover
+ * at the reveal, so without this the image starts downloading at the reveal
+ * and often isn't there before the round moves on. Each promise settles
+ * (true = cached, false = failed) so the store can wait for it.
+ */
+const covers = new Map<string, Promise<boolean>>();
+
+export function preloadCover(url: string | null | undefined): Promise<boolean> {
+  if (!url) return Promise.resolve(true);
+  let p = covers.get(url);
+  if (!p) {
+    p = Image.prefetch(url).then(
+      (ok) => ok !== false,
+      () => false
+    );
+    covers.set(url, p);
+    // Let a failed prefetch be retried next time it is asked for.
+    p.then((ok) => {
+      if (!ok) covers.delete(url);
+    });
+  }
+  return p;
+}
 
 /**
  * Preloaded clip players, keyed by preview URL.
@@ -38,6 +64,7 @@ export function takeClip(url: string): AudioPlayer | null {
 
 /** Releases cached players, except URLs listed in `keep`. */
 export function clearClips(keep: Iterable<string> = []) {
+  covers.clear();
   const keepSet = new Set(keep);
   for (const [url, player] of players) {
     if (keepSet.has(url)) continue;
