@@ -1,24 +1,174 @@
 /**
- * Music catalog client.
+ * Music catalog client — Spotify first, Deezer as the fallback.
  *
- * Artist search and track catalogs come from Deezer's public API (free, no
- * key). Playable 30s previews come from iTunes first, because Deezer preview
- * links are signed and expire after ~15 minutes — too short for a room that
- * sits in the lobby — with the Deezer preview as a last resort.
+ * Artist search and track catalogs come from the Spotify Web API (Client
+ * Credentials) when it is available: best catalog + current artist photos.
+ * Spotify refuses every call while the developer app's owner has no Premium
+ * (HTTP 403 "Active premium subscription required for the owner of the
+ * app"); on that, rate limiting or outages Spotify is put on a short
+ * cooldown and Deezer's free, keyless API answers instead, so search never
+ * collapses into "No artists found".
  *
- * This used to be the Spotify Web API (Client Credentials). Spotify now
- * rejects every call from apps whose owner lacks Premium (HTTP 403 "Active
- * premium subscription required for the owner of the app"), which surfaced
- * as "No artists found". The file name and exported types are kept so the
- * rest of the app (and the `spotify_*` DB columns, which now hold Deezer
- * ids) need no changes.
+ * Playable 30s previews come from iTunes first (Spotify no longer serves
+ * previews to new apps, and Deezer's preview links expire after ~15
+ * minutes), with Deezer previews as a last resort.
+ *
+ * Artist/track ids are Spotify ids (22-char base62) or Deezer ids (numeric);
+ * the `spotify_*` DB columns store whichever source produced the pool.
  */
 
 export interface SpotifyArtist {
   id: string;
   name: string;
+  /** ~500px picture for larger displays. */
   image: string;
+  /** ~250px picture for small avatars (search rows). Falls back to `image`. */
+  thumb?: string;
 }
+
+// ─── Spotify ──────────────────────────────────────────────────────────
+
+const SPOTIFY_TOKEN_ENDPOINT = 'https://accounts.spotify.com/api/token';
+const SPOTIFY_API = 'https://api.spotify.com/v1';
+const CLIENT_ID = (process.env.EXPO_PUBLIC_SPOTIFY_CLIENT_ID ?? '').trim();
+const CLIENT_SECRET = (process.env.EXPO_PUBLIC_SPOTIFY_CLIENT_SECRET ?? '').trim();
+const hasSpotifyCredentials = CLIENT_ID.length > 0 && CLIENT_SECRET.length > 0;
+
+/** After Spotify refuses (403/429/5xx), skip it for this long. */
+const SPOTIFY_COOLDOWN_MS = 5 * 60 * 1000;
+let spotifyDownUntil = 0;
+let cachedToken: { value: string; expiresAt: number } | null = null;
+
+function spotifyAvailable(): boolean {
+  return hasSpotifyCredentials && Date.now() >= spotifyDownUntil;
+}
+
+function markSpotifyDown(reason: string, ms = SPOTIFY_COOLDOWN_MS) {
+  spotifyDownUntil = Date.now() + ms;
+  console.warn(`[catalog] Spotify unavailable (${reason}); using Deezer for ${Math.round(ms / 1000)}s`);
+}
+
+const BASE64_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+function base64Encode(input: string): string {
+  const bytes = Array.from(input).map((c) => c.charCodeAt(0) & 0xff);
+  let out = '';
+  for (let i = 0; i < bytes.length; i += 3) {
+    const [b1, b2, b3] = [bytes[i], bytes[i + 1], bytes[i + 2]];
+    out += BASE64_CHARS[b1 >> 2];
+    out += BASE64_CHARS[((b1 & 3) << 4) | ((b2 ?? 0) >> 4)];
+    out += b2 === undefined ? '=' : BASE64_CHARS[((b2 & 15) << 2) | ((b3 ?? 0) >> 6)];
+    out += b3 === undefined ? '=' : BASE64_CHARS[b3 & 63];
+  }
+  return out;
+}
+
+async function getSpotifyToken(): Promise<string | null> {
+  if (cachedToken && cachedToken.expiresAt > Date.now()) return cachedToken.value;
+  try {
+    const res = await fetch(SPOTIFY_TOKEN_ENDPOINT, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        Authorization: `Basic ${base64Encode(`${CLIENT_ID}:${CLIENT_SECRET}`)}`,
+      },
+      body: 'grant_type=client_credentials',
+    });
+    const data = await res.json();
+    if (!data?.access_token) {
+      markSpotifyDown(`auth ${res.status}`);
+      return null;
+    }
+    cachedToken = {
+      value: data.access_token,
+      expiresAt: Date.now() + ((data.expires_in ?? 3600) - 60) * 1000,
+    };
+    return cachedToken.value;
+  } catch (e) {
+    markSpotifyDown('auth request failed');
+    return null;
+  }
+}
+
+/**
+ * GET a Spotify endpoint. Returns null on any failure. `critical` calls
+ * (search) put Spotify on cooldown when refused; optional endpoints (top
+ * tracks, albums) that may be restricted on their own just return null.
+ */
+async function spotifyGet(path: string, critical = true): Promise<any | null> {
+  if (!spotifyAvailable()) return null;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const token = await getSpotifyToken();
+    if (!token) return null;
+    try {
+      const res = await fetch(`${SPOTIFY_API}${path}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) return await res.json();
+      if (res.status === 401 && attempt === 0) {
+        cachedToken = null; // expired token — refresh once and retry
+        continue;
+      }
+      if (critical) {
+        if (res.status === 429) {
+          const retryAfter = Number(res.headers.get('retry-after')) || 30;
+          markSpotifyDown('rate limited', retryAfter * 1000);
+        } else if (res.status === 403 || res.status >= 500) {
+          // Spotify sends this reason as plain text or as { error: { message } }.
+          let detail = '';
+          try {
+            const body = await res.text();
+            try {
+              detail = JSON.parse(body)?.error?.message ?? body;
+            } catch {
+              detail = body;
+            }
+          } catch {}
+          detail = detail.slice(0, 120);
+          markSpotifyDown(`${res.status} ${detail}`.trim());
+        }
+      }
+      return null;
+    } catch (e) {
+      if (critical) markSpotifyDown('request failed');
+      return null;
+    }
+  }
+  return null;
+}
+
+/** Spotify ids are 22-character base62 strings. */
+function isSpotifyId(id: string): boolean {
+  return /^[0-9A-Za-z]{22}$/.test(id);
+}
+
+type SpotifyImage = { url: string; width?: number | null };
+function largestImage(images: SpotifyImage[] | undefined): string {
+  return images?.[0]?.url ?? '';
+}
+function smallImage(images: SpotifyImage[] | undefined): string {
+  // Spotify lists images largest first (640, 320, 160).
+  return images?.find((i) => (i.width ?? 0) > 0 && (i.width ?? 0) <= 320)?.url ?? largestImage(images);
+}
+
+function parseSpotifyArtist(item: any): SpotifyArtist {
+  return {
+    id: item.id,
+    name: item.name,
+    image: largestImage(item.images),
+    thumb: smallImage(item.images),
+  };
+}
+
+/** Returns null when Spotify couldn't answer (vs [] for "no matches"). */
+async function searchSpotifyArtists(query: string, limit: number): Promise<SpotifyArtist[] | null> {
+  const data = await spotifyGet(
+    `/search?q=${encodeURIComponent(query)}&type=artist&limit=${Math.min(limit, 10)}`
+  );
+  if (!data) return null;
+  return ((data?.artists?.items ?? []) as any[]).map(parseSpotifyArtist);
+}
+
+// ─── Deezer ───────────────────────────────────────────────────────────
 
 const DEEZER_API = 'https://api.deezer.com';
 
@@ -46,7 +196,8 @@ function parseDeezerArtist(item: any): SpotifyArtist {
   return {
     id: String(item.id),
     name: item.name,
-    image: item.picture_xl || item.picture_big || item.picture_medium || '',
+    image: item.picture_big || item.picture_xl || item.picture_medium || '',
+    thumb: item.picture_medium || item.picture_big || '',
   };
 }
 
@@ -65,9 +216,17 @@ async function searchDeezerArtists(query: string, limit: number): Promise<Spotif
     .map(parseDeezerArtist);
 }
 
+/** Spotify first; Deezer when Spotify can't answer or finds nothing. */
+async function findArtists(query: string, limit: number): Promise<SpotifyArtist[]> {
+  const spotify = await searchSpotifyArtists(query, limit);
+  if (spotify && spotify.length > 0) return spotify;
+  return searchDeezerArtists(query, limit);
+}
+
 /**
- * Curated "top artists" list, refreshed live (names + images) from Deezer.
- * Falls back to the static list if the network is unavailable.
+ * Curated "top artists" list, refreshed live (names + images) from Spotify,
+ * or Deezer when Spotify is unavailable. Falls back to the static list if
+ * neither can be reached.
  */
 export async function getTopArtists(limit = 6): Promise<SpotifyArtist[]> {
   const queries = [
@@ -81,7 +240,7 @@ export async function getTopArtists(limit = 6): Promise<SpotifyArtist[]> {
     'Kendrick Lamar',
   ];
   const results = await Promise.all(
-    queries.map(async (name) => (await searchDeezerArtists(name, 1))[0] ?? null)
+    queries.map(async (name) => (await findArtists(name, 1))[0] ?? null)
   );
   const artists = results.filter((a): a is SpotifyArtist => a !== null);
   if (artists.length === 0) return FALLBACK_TOP_ARTISTS.slice(0, limit);
@@ -99,7 +258,7 @@ export async function searchArtists(
   const q = query.trim();
   if (!q) return [];
 
-  const live = await searchDeezerArtists(q, limit);
+  const live = await findArtists(q, limit);
   if (live.length > 0) return live;
 
   const needle = q.toLowerCase();
@@ -173,7 +332,67 @@ function shuffle<T>(arr: T[]): T[] {
 
 interface DeezerCandidate extends TrackCandidate {
   /** Deezer's own preview (signed, expires ~15 min) — last-resort fallback. */
-  deezerPreview: string;
+  deezerPreview?: string;
+}
+
+/**
+ * Collects candidate tracks for a Spotify artist, deduped by title: top
+ * tracks, then album/single tracks, then paged track search (the search
+ * endpoint keeps working when top-tracks/albums are restricted for an app).
+ */
+async function collectSpotifyCandidates(
+  artistId: string,
+  artistName: string,
+  cap = 40
+): Promise<DeezerCandidate[]> {
+  const byName = new Map<string, DeezerCandidate>();
+  const push = (items: any[], fallbackArt = '', requireArtist = false) => {
+    for (const t of items) {
+      if (byName.size >= cap) return;
+      if (!t?.id || !t?.name) continue;
+      if (requireArtist && !(t?.artists ?? []).some((a: any) => a?.id === artistId)) continue;
+      const key = normalizeName(t.name);
+      if (!key || byName.has(key)) continue;
+      byName.set(key, {
+        id: t.id,
+        name: t.name,
+        albumArtUrl: largestImage(t?.album?.images) || fallbackArt,
+      });
+    }
+  };
+
+  // 1. Top tracks (optional endpoint — may be restricted)
+  const top = await spotifyGet(`/artists/${artistId}/top-tracks?market=US`, false);
+  push(top?.tracks ?? []);
+
+  // 2. Albums + singles
+  if (byName.size < cap) {
+    const albums = await spotifyGet(
+      `/artists/${artistId}/albums?include_groups=album,single&market=US&limit=50`,
+      false
+    );
+    for (const album of (albums?.items ?? []) as any[]) {
+      if (byName.size >= cap) break;
+      const tracks = await spotifyGet(`/albums/${album.id}/tracks?market=US&limit=50`, false);
+      push(tracks?.items ?? [], largestImage(album?.images), true);
+    }
+  }
+
+  // 3. Paged search fallback
+  for (const q of [`artist:"${artistName}"`, artistName]) {
+    let offset = 0;
+    while (byName.size < cap && offset < cap * 4) {
+      const data = await spotifyGet(
+        `/search?q=${encodeURIComponent(q)}&type=track&limit=10&offset=${offset}&market=US`
+      );
+      const items: any[] = data?.tracks?.items ?? [];
+      if (items.length === 0) break;
+      push(items, '', true);
+      offset += 10;
+    }
+  }
+
+  return Array.from(byName.values()).slice(0, cap);
 }
 
 /**
@@ -305,10 +524,11 @@ function sameArtistName(query: string, candidate: string): boolean {
  */
 async function resolvePreview(
   artistName: string,
-  trackName: string
+  trackName: string,
+  useItunes = true
 ): Promise<ResolvedPreview | null> {
-  // 1. iTunes
-  try {
+  // 1. iTunes (rate limited ~20/min, so callers can skip it)
+  if (useItunes) try {
     const term = encodeURIComponent(`${artistName} ${trackName}`);
     const res = await fetch(
       `https://itunes.apple.com/search?term=${term}&entity=song&limit=25`
@@ -388,47 +608,75 @@ export async function getArtistTrackPool(
   limit = 10
 ): Promise<ArtistTrackPool> {
   try {
-    const deezerId = await resolveDeezerArtistId(artistId, artistName);
-    if (!deezerId) return { tracks: [], optionNames: [] };
+    const cap = limit * 6;
+    const itunesPromise = fetchItunesPreviews(artistName);
 
     // Fetch a wide slice of the catalog so we have plenty of same-artist names
     // to draw alternatives from after the playable pool is filled.
-    const [catalog, itunes] = await Promise.all([
-      collectCandidates(deezerId, limit * 6),
-      fetchItunesPreviews(artistName),
-    ]);
-    const candidates = shuffle(catalog);
+    // 1. Spotify, when this is a Spotify artist and Spotify is answering.
+    let candidates: DeezerCandidate[] = [];
+    if (isSpotifyId(artistId) && spotifyAvailable()) {
+      candidates = shuffle(await collectSpotifyCandidates(artistId, artistName, cap));
+    }
+
+    const itunes = await itunesPromise;
     const tracks: TrackPoolItem[] = [];
     const chosen = new Set<string>();
+    const seenNames = new Set(candidates.map((c) => normalizeName(c.name)));
 
-    // Per-track iTunes lookups are rate limited, so cap them; the Deezer
-    // preview (short-lived) is the final fallback.
-    let lookupsLeft = 8;
-    for (const track of candidates) {
-      if (tracks.length >= limit) break;
-      let preview: ResolvedPreview | null = null;
-      const bulk = findItunesPreview(itunes, track.name);
-      if (bulk) {
-        preview = { url: bulk, source: 'itunes', durationMs: 30000 };
-      } else if (lookupsLeft > 0) {
-        lookupsLeft--;
-        preview = await resolvePreview(artistName, track.name);
-      }
-      if (!preview && track.deezerPreview) {
-        preview = { url: track.deezerPreview, source: 'deezer', durationMs: 30000 };
-      }
-      if (!preview) continue;
+    // Per-track iTunes lookups are rate limited, so cap them; after that,
+    // Deezer (own preview, then a Deezer search) is the fallback.
+    let itunesLookupsLeft = 8;
+    const fill = async (list: DeezerCandidate[]) => {
+      for (const track of list) {
+        if (tracks.length >= limit) break;
+        let preview: ResolvedPreview | null = null;
+        const bulk = findItunesPreview(itunes, track.name);
+        if (bulk) {
+          preview = { url: bulk, source: 'itunes', durationMs: 30000 };
+        } else {
+          const useItunes = itunesLookupsLeft > 0;
+          if (useItunes) itunesLookupsLeft--;
+          if (track.deezerPreview && !useItunes) {
+            preview = { url: track.deezerPreview, source: 'deezer', durationMs: 30000 };
+          } else {
+            preview = await resolvePreview(artistName, track.name, useItunes);
+          }
+          if (!preview && track.deezerPreview) {
+            preview = { url: track.deezerPreview, source: 'deezer', durationMs: 30000 };
+          }
+        }
+        if (!preview) continue;
 
-      chosen.add(track.id);
-      tracks.push({
-        spotifyTrackId: track.id,
-        trackName: track.name,
-        albumArtUrl: track.albumArtUrl,
-        previewUrl: preview.url,
-        previewSource: preview.source,
-        durationMs: preview.durationMs,
-        clipStartMs: pickClipStart(preview.durationMs),
-      });
+        chosen.add(track.id);
+        tracks.push({
+          spotifyTrackId: track.id,
+          trackName: track.name,
+          albumArtUrl: track.albumArtUrl,
+          previewUrl: preview.url,
+          previewSource: preview.source,
+          durationMs: preview.durationMs,
+          clipStartMs: pickClipStart(preview.durationMs),
+        });
+      }
+    };
+
+    await fill(candidates);
+
+    // 2. Deezer top-up: Spotify unavailable/failed mid-way, a Deezer artist,
+    //    or too few Spotify songs had a playable preview.
+    if (tracks.length < limit || candidates.length < limit * 2) {
+      const deezerId = await resolveDeezerArtistId(artistId, artistName);
+      if (deezerId) {
+        const extra = shuffle(await collectCandidates(deezerId, cap)).filter((c) => {
+          const key = normalizeName(c.name);
+          if (seenNames.has(key)) return false;
+          seenNames.add(key);
+          return true;
+        });
+        candidates = [...candidates, ...extra];
+        if (tracks.length < limit) await fill(extra);
+      }
     }
 
     const optionNames = candidates
