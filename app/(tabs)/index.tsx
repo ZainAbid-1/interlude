@@ -172,7 +172,7 @@ export default function HomeScreen() {
     if (!ok) return;
     try {
       await Share.share({
-        message: `Join my Interlude room! Code: ${roomCode}\n\nPlay now: interlude://join/${roomCode}`,
+        message: `Join my Interlude room! Code: ${roomCode}\n\nOpen Interlude, tap "Join a Room" and enter the code.`,
         title: 'Join my Interlude game!',
       });
     } catch (e) {
@@ -183,7 +183,7 @@ export default function HomeScreen() {
   const handleCopyLink = async () => {
     const ok = await ensureRoom();
     if (!ok) return;
-    await Clipboard.setStringAsync(`interlude://join/${roomCode}`);
+    await Clipboard.setStringAsync(roomCode);
     setCopied(true);
     setTimeout(() => setCopied(false), 1600);
   };
@@ -295,20 +295,11 @@ export default function HomeScreen() {
                                 styles.resultRowActive,
                             ]}
                           >
-                            {artist.image ? (
-                              <Image
-                                source={{ uri: artist.image }}
-                                style={styles.resultImage}
-                              />
-                            ) : (
-                              <View style={styles.resultImagePlaceholder}>
-                                <MaterialCommunityIcons
-                                  name="music-note"
-                                  size={18}
-                                  color={WARM_GOLD}
-                                />
-                              </View>
-                            )}
+                            <ArtistAvatar
+                              uri={artist.thumb || artist.image}
+                              style={styles.resultImage}
+                              iconSize={18}
+                            />
                             <Text style={styles.resultName} numberOfLines={1}>
                               {artist.name}
                             </Text>
@@ -336,9 +327,10 @@ export default function HomeScreen() {
                 </>
               ) : chosenArtist ? (
                 <View style={styles.chosenRow}>
-                  <Image
-                    source={{ uri: chosenArtist.image }}
+                  <ArtistAvatar
+                    uri={chosenArtist.image || chosenArtist.thumb}
                     style={styles.chosenImage}
+                    iconSize={24}
                   />
                   <View style={styles.chosenText}>
                     <Text style={styles.chosenLabel}>Playing with</Text>
@@ -380,12 +372,12 @@ export default function HomeScreen() {
               {/* Invite */}
               <View style={styles.inviteHeaderRow}>
                 <View style={styles.inviteIconRing}>
-                  <Ionicons name="link-outline" size={18} color={WARM_GOLD} />
+                  <Ionicons name="key-outline" size={18} color={WARM_GOLD} />
                 </View>
                 <View style={styles.inviteHeaderText}>
                   <Text style={styles.inviteLabel}>Invite a friend</Text>
                   <Text style={styles.inviteHint}>
-                    Share your room link to start playing
+                    Share your room code to start playing
                   </Text>
                 </View>
               </View>
@@ -399,8 +391,11 @@ export default function HomeScreen() {
                     </Text>
                   </View>
                 ) : (
-                  <Text style={styles.linkText} numberOfLines={1}>
-                    interlude://join/{roomCode}
+                  <Text
+                    style={[styles.linkText, roomCode ? styles.codeText : null]}
+                    numberOfLines={1}
+                  >
+                    {roomCode || 'Pick an artist to get a code'}
                   </Text>
                 )}
                 <Pressable
@@ -589,6 +584,50 @@ function FloatingDot({ config }: { config: any }) {
         dotStyle,
       ]}
     />
+  );
+}
+
+// ─── Artist avatar ───────────────────────────────────────────────────
+
+/**
+ * Round artist picture that never shows as an empty circle: the music-note
+ * placeholder stays underneath until the photo has actually loaded, and stays
+ * on its own if the photo fails (the failure is logged for debugging).
+ */
+function ArtistAvatar({
+  uri,
+  style,
+  iconSize,
+}: {
+  uri?: string;
+  style: any;
+  iconSize: number;
+}) {
+  const [loaded, setLoaded] = useState(false);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    setLoaded(false);
+    setFailed(false);
+  }, [uri]);
+
+  return (
+    <View style={[style, styles.avatarFrame]}>
+      <MaterialCommunityIcons name="music-note" size={iconSize} color={WARM_GOLD} />
+      {uri && !failed ? (
+        <Image
+          source={{ uri }}
+          // Decode at the circle's size on Android instead of full resolution.
+          resizeMethod="resize"
+          style={[StyleSheet.absoluteFill, { opacity: loaded ? 1 : 0 }]}
+          onLoad={() => setLoaded(true)}
+          onError={(e) => {
+            console.warn('[ArtistAvatar] failed to load', uri, e?.nativeEvent?.error);
+            setFailed(true);
+          }}
+        />
+      ) : null}
+    </View>
   );
 }
 
@@ -854,6 +893,11 @@ const styles = StyleSheet.create({
     borderRadius: 27,
     backgroundColor: Colors.surfaceContainer,
   },
+  avatarFrame: {
+    overflow: 'hidden',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   chosenText: {
     flex: 1,
     minWidth: 0,
@@ -966,6 +1010,11 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: WARM_GOLD_BRIGHT,
     letterSpacing: 0.3,
+  },
+  codeText: {
+    fontFamily: 'Inter-Bold',
+    fontSize: 22,
+    letterSpacing: 6,
   },
   linkLoading: {
     flex: 1,
