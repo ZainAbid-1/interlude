@@ -217,9 +217,14 @@ async function searchDeezerArtists(query: string, limit: number): Promise<Spotif
 }
 
 /** Spotify first; Deezer when Spotify can't answer or finds nothing. */
+/**
+ * Spotify only. Deezer is used for the whole request solely when Spotify
+ * fails outright (refused, cooling down, unreachable) — never mixed in, and
+ * not when Spotify simply finds no matches.
+ */
 async function findArtists(query: string, limit: number): Promise<SpotifyArtist[]> {
   const spotify = await searchSpotifyArtists(query, limit);
-  if (spotify && spotify.length > 0) return spotify;
+  if (spotify !== null) return spotify;
   return searchDeezerArtists(query, limit);
 }
 
@@ -365,17 +370,20 @@ async function collectSpotifyCandidates(
   const top = await spotifyGet(`/artists/${artistId}/top-tracks?market=US`, false);
   push(top?.tracks ?? []);
 
-  // 2. Albums + singles
-  if (byName.size < cap) {
+  // 2. Albums + singles. Development-mode apps get 400 "Invalid limit" above
+  //    10 albums per page, so page through 10 at a time (max 3 pages).
+  for (let page = 0; page < 3 && byName.size < cap; page++) {
     const albums = await spotifyGet(
-      `/artists/${artistId}/albums?include_groups=album,single&market=US&limit=50`,
+      `/artists/${artistId}/albums?include_groups=album,single&market=US&limit=10&offset=${page * 10}`,
       false
     );
-    for (const album of (albums?.items ?? []) as any[]) {
+    const items: any[] = albums?.items ?? [];
+    for (const album of items) {
       if (byName.size >= cap) break;
       const tracks = await spotifyGet(`/albums/${album.id}/tracks?market=US&limit=50`, false);
       push(tracks?.items ?? [], largestImage(album?.images), true);
     }
+    if (items.length < 10) break;
   }
 
   // 3. Paged search fallback
@@ -622,7 +630,6 @@ export async function getArtistTrackPool(
     const itunes = await itunesPromise;
     const tracks: TrackPoolItem[] = [];
     const chosen = new Set<string>();
-    const seenNames = new Set(candidates.map((c) => normalizeName(c.name)));
 
     // Per-track iTunes lookups are rate limited, so cap them; after that,
     // Deezer (own preview, then a Deezer search) is the fallback.
@@ -661,23 +668,16 @@ export async function getArtistTrackPool(
       }
     };
 
-    await fill(candidates);
-
-    // 2. Deezer top-up: Spotify unavailable/failed mid-way, a Deezer artist,
-    //    or too few Spotify songs had a playable preview.
-    if (tracks.length < limit || candidates.length < limit * 2) {
+    // One source per room, never mixed: if Spotify produced any songs, the
+    // room uses only those. Deezer builds the list only for a Deezer artist,
+    // or when Spotify failed outright and returned nothing.
+    if (candidates.length === 0) {
       const deezerId = await resolveDeezerArtistId(artistId, artistName);
       if (deezerId) {
-        const extra = shuffle(await collectCandidates(deezerId, cap)).filter((c) => {
-          const key = normalizeName(c.name);
-          if (seenNames.has(key)) return false;
-          seenNames.add(key);
-          return true;
-        });
-        candidates = [...candidates, ...extra];
-        if (tracks.length < limit) await fill(extra);
+        candidates = shuffle(await collectCandidates(deezerId, cap));
       }
     }
+    await fill(candidates);
 
     const optionNames = candidates
       .filter((t) => !chosen.has(t.id) && t.name)
