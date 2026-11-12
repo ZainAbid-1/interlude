@@ -1,5 +1,7 @@
 import { create } from 'zustand';
-import { supabase } from '../lib/supabase';
+import { AppState } from 'react-native';
+import type { NativeEventSubscription } from 'react-native';
+import { supabase, onRealtimeHeartbeat } from '../lib/supabase';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 import type { RoomPoolTrack } from '../services/rooms';
 import { loadPool } from '../services/rooms';
@@ -76,14 +78,32 @@ interface GameState {
   loading: boolean;
   error: string | null;
 
+  // Connectivity
+  /** waiting: not seen yet · connected · reconnecting: silent or app in
+   *  background · left: exited or gone too long · absent: the host never
+   *  showed up after the guest joined. */
+  opponentStatus: OpponentStatus;
+  /** This phone's own link to the game channel. */
+  selfConnection: 'connected' | 'reconnecting';
+
   // Actions
   prepareMatch: (
     roomId: string
   ) => Promise<{ ok: boolean; error?: string; startAtHost?: number }>;
   initGame: (roomId: string, isHost: boolean) => Promise<{ ok: boolean; error?: string }>;
   submitAnswer: (answer: string) => Promise<void>;
+  /** Exit mid-match: tells the opponent right away, then tears down. */
+  leaveMatch: () => void;
   resetGame: () => void;
 }
+
+export type OpponentStatus =
+  | 'waiting'
+  | 'connected'
+  | 'reconnecting'
+  | 'left'
+  | 'ended'
+  | 'absent';
 
 function calculatePoints(isCorrect: boolean, responseMs: number): number {
   if (!isCorrect) return 0;
@@ -205,8 +225,335 @@ async function getPool(poolId: string): Promise<LoadedPool | { error: string }> 
 }
 
 function teardownChannel() {
+  stopPresence();
   if (gameChannel) supabase?.removeChannel(gameChannel);
   gameChannel = null;
+}
+
+// ─── Presence: is the other player still here? ─────────────────────────
+
+/** Heartbeat interval; any broadcast from the opponent also counts. */
+const HEARTBEAT_MS = 2000;
+/** Silence before showing "reconnecting" and pausing the match. */
+const OPPONENT_LOST_MS = 6000;
+/** Silence before giving up: the opponent has left. */
+const OPPONENT_GONE_MS = 60000;
+/** Guest only: how long to wait for the host to appear after joining. */
+const HOST_ABSENT_MS = 20000;
+
+let presenceTimer: ReturnType<typeof setInterval> | null = null;
+let appStateSub: NativeEventSubscription | null = null;
+let lastOpponentSeen = 0;
+let opponentSeen = false;
+let opponentLeftOnPurpose = false;
+let presenceStartedAt = 0;
+
+function setOpponentStatus(status: OpponentStatus) {
+  if (useGameStore.getState().opponentStatus !== status) {
+    useGameStore.setState({ opponentStatus: status });
+  }
+}
+
+let lastEndNotice = 0;
+
+/** Called for every message the opponent sends: proof they're still here. */
+function touchOpponent() {
+  lastOpponentSeen = Date.now();
+  opponentSeen = true;
+  if (opponentLeftOnPurpose) {
+    // We already ended this match (they were gone too long). They're back:
+    // tell them, so their screen doesn't sit "connected" on a dead match.
+    if (Date.now() - lastEndNotice > 5000) {
+      lastEndNotice = Date.now();
+      sendPresence('leave', 'timeout');
+    }
+    return;
+  }
+  const wasAway = useGameStore.getState().opponentStatus === 'reconnecting';
+  setOpponentStatus('connected');
+  // They're back: whatever we sent while they were away never reached them.
+  if (wasAway) resyncGame();
+}
+
+// ─── Resync after a drop ────────────────────────────────────────────────
+
+/** DB writes that failed (usually offline), retried after reconnecting. */
+let pendingWrites: Array<() => Promise<boolean>> = [];
+
+function queueWrite(write: () => Promise<boolean>) {
+  pendingWrites.push(write);
+}
+
+async function flushPendingWrites() {
+  const writes = pendingWrites;
+  pendingWrites = [];
+  for (const write of writes) {
+    let ok = false;
+    try {
+      ok = await write();
+    } catch {}
+    if (!ok) pendingWrites.push(write);
+  }
+}
+
+/** Saves an answer; on failure it is queued and retried after reconnecting. */
+async function persistAnswer(
+  roundId: string,
+  playerId: string,
+  choice: string,
+  responseMs: number,
+  correct: boolean,
+  points: number
+) {
+  const write = async () => {
+    const res = await submitRoundAnswer(roundId, playerId, choice, responseMs, correct, points);
+    // A duplicate (unique round_id+player_id) means it already landed.
+    return res.ok || /duplicate|unique/i.test(res.error ?? '');
+  };
+  if (!(await write().catch(() => false))) queueWrite(write);
+}
+
+let lastResyncAt = 0;
+
+/**
+ * Broadcasts are fire-and-forget, so anything sent while either phone was
+ * offline is simply gone — e.g. an answer, which left the opponent waiting
+ * forever. After a reconnect (ours or theirs) send the current state again.
+ * Receivers ignore duplicates (applyOpponentAnswer, beginRound guards).
+ */
+function resyncGame() {
+  const s = useGameStore.getState();
+  if (!s.roomId || s.gameOver || opponentLeftOnPurpose) return;
+  if (Date.now() - lastResyncAt < 1500) return;
+  lastResyncAt = Date.now();
+
+  void flushPendingWrites();
+
+  const round = s.currentRound;
+  if (round && s.myAnswered && (s.roundState === 'answered' || s.roundState === 'result')) {
+    sendAnswer(
+      round.id,
+      s.playerId,
+      s.selectedAnswer ?? '',
+      s.isCorrect === true,
+      s.pointsAwarded,
+      s.responseTimeMs
+    );
+  }
+  if (s.isHost && s.currentRoundIndex >= 1 && roundTiming.index === s.currentRoundIndex) {
+    gameChannel?.send({
+      type: 'broadcast',
+      event: 'round',
+      payload: { roundIndex: s.currentRoundIndex, startAtHost: roundTiming.startAtLocal },
+    });
+  }
+  if (!s.isHost && round && s.roundState === 'result') {
+    gameChannel?.send({
+      type: 'broadcast',
+      event: 'cover-ready',
+      payload: { roundIndex: round.roundIndex },
+    });
+  }
+  // Catch up on anything the room moved past while we were away.
+  fetchRoom(s.roomId).then((room) => room && onRoomRow(room));
+  if (round && s.roundState === 'answered' && !s.opponentAnswered) {
+    pollForOpponentAnswer(round.id);
+  }
+}
+
+function sendPresence(event: 'hb' | 'away' | 'leave', reason?: 'timeout') {
+  gameChannel?.send({
+    type: 'broadcast',
+    event,
+    payload: { from: useGameStore.getState().playerId, reason },
+  });
+}
+
+function startPresence() {
+  stopPresence();
+  lastOpponentSeen = 0;
+  opponentSeen = false;
+  opponentLeftOnPurpose = false;
+  lastEndNotice = 0;
+  presenceStartedAt = Date.now();
+
+  lastSocketOk = Date.now();
+  presenceTimer = setInterval(() => {
+    void presenceTick();
+  }, HEARTBEAT_MS);
+
+  // The socket's own heartbeat is the earliest sign *we* lost the network.
+  heartbeatUnsub = onRealtimeHeartbeat((status) => {
+    if (status === 'ok') {
+      lastSocketOk = Date.now();
+    } else if (status === 'timeout' || status === 'disconnected' || status === 'error') {
+      if (!recovering) goOffline();
+    }
+  });
+
+  // Backgrounding freezes JS (no heartbeats), so say so explicitly; on
+  // return, announce ourselves again so the opponent resumes at once.
+  appStateSub = AppState.addEventListener('change', (state) => {
+    if (useGameStore.getState().gameOver) return;
+    if (state === 'background') sendPresence('away');
+    else if (state === 'active') {
+      // Our timers were frozen too: give the opponent a fresh window rather
+      // than counting our own time away as their silence.
+      lastOpponentSeen = Date.now();
+      presenceStartedAt = Date.now();
+      sendPresence('hb');
+      sendHello(false);
+    }
+  });
+}
+
+function stopPresence() {
+  if (presenceTimer) clearInterval(presenceTimer);
+  presenceTimer = null;
+  appStateSub?.remove();
+  appStateSub = null;
+  heartbeatUnsub?.();
+  heartbeatUnsub = null;
+}
+
+/** No socket heartbeat answer for this long ⇒ our socket is stale. */
+const SOCKET_STALE_MS = 12000;
+let lastSocketOk = 0;
+let heartbeatUnsub: (() => void) | null = null;
+let recovering = false;
+let lastRecoverAt = 0;
+
+/** This phone lost its link: show "You're offline", never blame the opponent. */
+function goOffline() {
+  const s = useGameStore.getState();
+  if (!s.roomId || s.gameOver) return;
+  lastOpponentSeen = Date.now();
+  if (s.selfConnection !== 'reconnecting') {
+    useGameStore.setState({ selfConnection: 'reconnecting' });
+  }
+}
+
+/**
+ * Can this phone reach Supabase right now? A tiny HEAD request with a 3s
+ * cap; any HTTP answer (even an error status) means the network is up.
+ */
+let probeInFlight: Promise<boolean> | null = null;
+function probeNetwork(): Promise<boolean> {
+  if (!supabase) return Promise.resolve(false);
+  if (probeInFlight) return probeInFlight;
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 3000);
+  probeInFlight = (async () => {
+    try {
+      const { status } = await supabase!
+        .from('rooms')
+        .select('id', { head: true })
+        .limit(1)
+        .abortSignal(ctrl.signal);
+      return status > 0;
+    } catch {
+      return false;
+    } finally {
+      clearTimeout(timer);
+      probeInFlight = null;
+    }
+  })();
+  return probeInFlight;
+}
+
+/**
+ * Network is back but the channel isn't: drop the (likely stale) socket and
+ * join the game channel afresh, keeping presence and match state intact.
+ * Waiting for the library to notice its dead socket was the slow part.
+ */
+async function recoverChannel() {
+  const roomId = useGameStore.getState().roomId;
+  if (!supabase || !roomId || recovering || Date.now() - lastRecoverAt < 4000) return;
+  recovering = true;
+  lastRecoverAt = Date.now();
+  try {
+    const old = gameChannel;
+    gameChannel = null; // its CLOSED callback is now ignored
+    if (old) await supabase.removeChannel(old).catch(() => {});
+    await supabase.realtime.disconnect().catch(() => {});
+    if (useGameStore.getState().roomId !== roomId) return; // left meanwhile
+    subscribeGameChannel(roomId, false); // subscribe() reconnects the socket
+  } finally {
+    recovering = false;
+  }
+}
+
+/** One presence step: heartbeat out, then judge who (if anyone) is gone. */
+async function presenceTick() {
+  const s = useGameStore.getState();
+  if (s.gameOver || !s.roomId) return;
+  const now = Date.now();
+
+  // While *we* are offline, silence from the opponent proves nothing:
+  // freeze their window, keep checking our own network, rejoin when it's up.
+  if (s.selfConnection !== 'connected') {
+    lastOpponentSeen = now;
+    presenceStartedAt = now;
+    if (await probeNetwork()) recoverChannel();
+    return;
+  }
+  sendPresence('hb');
+
+  // Network fine but our socket stopped answering heartbeats: it's stale.
+  if (now - lastSocketOk > SOCKET_STALE_MS) {
+    goOffline();
+    if (await probeNetwork()) recoverChannel();
+    return;
+  }
+
+  if (!opponentSeen) {
+    // The host can wait in the lobby indefinitely; a guest whose host
+    // never answers may be in a dead room.
+    if (!s.isHost && now - presenceStartedAt > HOST_ABSENT_MS) setOpponentStatus('absent');
+    return;
+  }
+  if (opponentLeftOnPurpose) return;
+  const silent = now - lastOpponentSeen;
+  if (silent <= OPPONENT_LOST_MS) return;
+
+  // Before blaming the opponent, make sure it isn't us.
+  if (!(await probeNetwork())) {
+    goOffline();
+    return;
+  }
+  if (opponentLeftOnPurpose || useGameStore.getState().selfConnection !== 'connected') return;
+  if (silent > OPPONENT_GONE_MS) {
+    markOpponentGone('left');
+    // If they come back later, touchOpponent tells them the match ended.
+    sendPresence('leave', 'timeout');
+    lastEndNotice = Date.now();
+  } else {
+    setOpponentStatus('reconnecting');
+  }
+}
+
+/** The opponent is gone for good: stop the match so nothing plays on alone. */
+function markOpponentGone(status: 'left' | 'ended') {
+  // Final for this match: a late heartbeat must not revive a stopped game.
+  opponentLeftOnPurpose = true;
+  setOpponentStatus(status);
+  clearTimers();
+  clearPolling();
+}
+
+/** Resolves once the opponent is connected; never resolves if they left. */
+function waitForOpponent(): Promise<void> {
+  if (useGameStore.getState().opponentStatus === 'connected') return Promise.resolve();
+  return new Promise((resolve) => {
+    const unsub = useGameStore.subscribe((s) => {
+      if (s.opponentStatus === 'connected') {
+        unsub();
+        resolve();
+      } else if (s.opponentStatus === 'left' || s.opponentStatus === 'ended' || s.gameOver || !s.roomId) {
+        unsub();
+      }
+    });
+  });
 }
 
 function resetSyncState() {
@@ -216,6 +563,8 @@ function resetSyncState() {
   poolCache = null;
   earlyAnswers.clear();
   guestCoverReady.clear();
+  pendingWrites = [];
+  lastResyncAt = 0;
   clearClips();
 }
 
@@ -256,6 +605,8 @@ export const useGameStore = create<GameState>((set, get) => ({
   gameOver: false,
   loading: false,
   error: null,
+  opponentStatus: 'waiting',
+  selfConnection: 'connected',
 
   /** Host-only: generate rounds (if needed) and activate the room. */
   prepareMatch: (roomId) => {
@@ -347,6 +698,8 @@ export const useGameStore = create<GameState>((set, get) => ({
       roundResults: [],
       myAnswered: false,
       opponentAnswered: false,
+      opponentStatus: 'waiting',
+      selfConnection: 'connected',
     });
 
     const room = await fetchRoom(roomId);
@@ -410,15 +763,24 @@ export const useGameStore = create<GameState>((set, get) => ({
     }
 
     if (state.playerId && round.id) {
-      await submitRoundAnswer(
-        round.id,
-        state.playerId,
-        answer,
-        responseMs,
-        correct,
-        points
-      );
+      await persistAnswer(round.id, state.playerId, answer, responseMs, correct, points);
     }
+  },
+
+  leaveMatch: () => {
+    const s = get();
+    // Tell the opponent first so their screen updates instantly instead of
+    // waiting out the heartbeat timeout. The channel is detached before the
+    // reset and only removed once the message is out.
+    const ch = gameChannel;
+    if (ch && s.roomId && !s.gameOver) {
+      gameChannel = null;
+      stopPresence();
+      ch.send({ type: 'broadcast', event: 'leave', payload: { from: s.playerId } })
+        .catch(() => {})
+        .finally(() => supabase?.removeChannel(ch));
+    }
+    get().resetGame();
   },
 
   resetGame: () => {
@@ -455,6 +817,8 @@ export const useGameStore = create<GameState>((set, get) => ({
       gameOver: false,
       loading: false,
       error: null,
+      opponentStatus: 'waiting',
+      selfConnection: 'connected',
     });
   },
 }));
@@ -630,15 +994,33 @@ function onRoomRow(room: any) {
  * message lands in roughly one network hop instead of
  * write → WAL → postgres_changes → RLS check → client (or the next poll tick).
  */
-function subscribeGameChannel(roomId: string) {
+function subscribeGameChannel(roomId: string, freshPresence = true) {
   const ch = supabase!.channel(`game:${roomId}`, {
     config: { broadcast: { self: false, ack: false } },
   });
   const isCurrent = () => gameChannel === ch;
   const me = () => useGameStore.getState().playerId;
 
-  ch.on('broadcast', { event: 'hello' }, ({ payload }) => {
+  // Presence: every message from the opponent is proof of life (touchOpponent
+  // is called in each handler below); these three exist only for presence.
+  ch.on('broadcast', { event: 'hb' }, ({ payload }) => {
+    if (isCurrent() && payload?.from !== me()) touchOpponent();
+  })
+    .on('broadcast', { event: 'away' }, ({ payload }) => {
+      if (!isCurrent() || payload?.from === me()) return;
+      // App went to the background: likely back soon, so pause, don't end.
+      lastOpponentSeen = Date.now();
+      if (!opponentLeftOnPurpose) setOpponentStatus('reconnecting');
+    })
+    .on('broadcast', { event: 'leave' }, ({ payload }) => {
+      if (!isCurrent() || payload?.from === me()) return;
+      if (useGameStore.getState().gameOver || opponentLeftOnPurpose) return;
+      // 'timeout' = they gave up on *us* while we were away.
+      markOpponentGone(payload?.reason === 'timeout' ? 'ended' : 'left');
+    })
+    .on('broadcast', { event: 'hello' }, ({ payload }) => {
     if (!isCurrent() || payload?.from === me()) return;
+    touchOpponent();
     const s = useGameStore.getState();
     // Answer a first hello so whoever subscribed first still hears from us.
     if (!payload?.reply) sendHello(true);
@@ -651,6 +1033,7 @@ function subscribeGameChannel(roomId: string) {
   })
     .on('broadcast', { event: 'ping' }, ({ payload }) => {
       if (!isCurrent() || !useGameStore.getState().isHost) return;
+      touchOpponent();
       ch.send({
         type: 'broadcast',
         event: 'pong',
@@ -659,6 +1042,7 @@ function subscribeGameChannel(roomId: string) {
     })
     .on('broadcast', { event: 'pong' }, ({ payload }) => {
       if (!isCurrent() || payload?.to !== me()) return;
+      touchOpponent();
       const t1 = Date.now();
       const rtt = t1 - payload.t0;
       if (rtt >= 0 && rtt < bestSyncRttMs) {
@@ -671,6 +1055,8 @@ function subscribeGameChannel(roomId: string) {
       if (!isCurrent()) return;
       const s = useGameStore.getState();
       if (s.isHost || s.gameOver) return;
+      touchOpponent();
+      if (opponentLeftOnPurpose) return;
       if (s.rounds.length === 0) {
         const poolId = poolCache?.id ?? (await fetchRoom(roomId))?.track_pool_id;
         if (poolId) await loadRounds(roomId, poolId);
@@ -679,10 +1065,12 @@ function subscribeGameChannel(roomId: string) {
     })
     .on('broadcast', { event: 'cover-ready' }, ({ payload }) => {
       if (!isCurrent() || !useGameStore.getState().isHost) return;
+      touchOpponent();
       guestCoverSignal(payload.roundIndex).resolve();
     })
     .on('broadcast', { event: 'answer' }, ({ payload }) => {
       if (!isCurrent() || payload?.playerId === me()) return;
+      touchOpponent();
       applyOpponentAnswer(payload.roundId, payload.correct === true, payload.points ?? 0);
     })
     .on(
@@ -698,8 +1086,21 @@ function subscribeGameChannel(roomId: string) {
       }
     )
     .subscribe((status) => {
-      if (!isCurrent() || status !== 'SUBSCRIBED') return;
+      if (!isCurrent()) return;
+      // Our own link: Realtime rejoins by itself after drops; show it.
+      if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+        useGameStore.setState({ selfConnection: 'reconnecting' });
+        return;
+      }
+      if (status !== 'SUBSCRIBED') return;
+      const wasOffline = useGameStore.getState().selfConnection === 'reconnecting' || !freshPresence;
+      useGameStore.setState({ selfConnection: 'connected' });
+      // Back online: start the opponent's silence window afresh.
+      lastOpponentSeen = Date.now();
+      lastSocketOk = Date.now();
       sendHello(false);
+      // Anything we sent while offline was lost: send the current state again.
+      if (wasOffline) resyncGame();
       if (useGameStore.getState().isHost) {
         // The guest may have joined before we subscribed.
         fetchRoom(roomId).then((room) => room && onRoomRow(room));
@@ -709,6 +1110,8 @@ function subscribeGameChannel(roomId: string) {
     });
 
   gameChannel = ch;
+  // A rejoin after a network drop keeps the opponent/match bookkeeping.
+  if (freshPresence) startPresence();
 }
 
 function sendHello(reply: boolean) {
@@ -906,14 +1309,7 @@ function beginRound(roundIndex: number, startAtHost?: number | null) {
           sendAnswer(s.currentRound.id, s.playerId, '', false, 0, ROUND_DURATION_MS);
         }
         if (s.playerId && s.currentRound?.id) {
-          submitRoundAnswer(
-            s.currentRound.id,
-            s.playerId,
-            '',
-            ROUND_DURATION_MS,
-            false,
-            0
-          );
+          persistAnswer(s.currentRound.id, s.playerId, '', ROUND_DURATION_MS, false, 0);
         }
         if (useGameStore.getState().opponentAnswered) {
           resolveRound();
@@ -1015,6 +1411,13 @@ function resolveRound() {
     if (isLast) {
       finalizeMatch();
     } else if (now.isHost) {
+      // Never start the next round for an opponent who isn't there: hold
+      // here while they reconnect (resolves only if they come back).
+      await waitForOpponent();
+      const after = useGameStore.getState();
+      if (after.gameOver || after.currentRoundIndex !== roundIndex || after.roundState !== 'result') {
+        return;
+      }
       advanceRoomRound();
     }
     // Guest waits for the host's 'round' broadcast (or the DB fallback).
@@ -1040,6 +1443,16 @@ async function advanceRoomRound() {
     .eq('current_round', current); // guard against double advance
   if (error) {
     console.warn('[game] advance failed', error.message);
+    // Offline: the guest may have missed the broadcast too. Retry the save on
+    // reconnect so the DB/polling path can still carry the round.
+    queueWrite(async () => {
+      const { error: retryErr } = await supabase!
+        .from('rooms')
+        .update({ current_round: next, round_started_at: new Date(startAtHost).toISOString() })
+        .eq('id', state.roomId)
+        .eq('current_round', current);
+      return !retryErr;
+    });
   }
 }
 

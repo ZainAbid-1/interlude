@@ -121,9 +121,23 @@ export default function GameScreen() {
     initGame(roomId, isHost);
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
+      // Leaving the screen any way (✕, Android back) mid-match tells the
+      // opponent immediately; after game over the results screen takes over.
+      if (!useGameStore.getState().gameOver) useGameStore.getState().leaveMatch();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roomId]);
+
+  /** Leave mid-match: tell the opponent, drop the room, go home. */
+  const exitMatch = useCallback(() => {
+    useGameStore.getState().leaveMatch();
+    // A match that already started can't be rejoined; the lobby keeps its
+    // room so the host can still share the code.
+    if (useGameStore.getState().currentRound || currentRound) {
+      useRoomStore.getState().resetRoom();
+    }
+    router.replace('/');
+  }, [currentRound]);
 
   // Navigate to results when the match completes.
   useEffect(() => {
@@ -221,10 +235,11 @@ export default function GameScreen() {
   if (loading || !currentRound) {
     return (
       <View style={[styles.screen, { paddingTop: insets.top }]}>
+        <ConnectionOverlay onExit={exitMatch} />
         {error ? (
           <View style={styles.loadingBlock}>
             <Text style={styles.errorText}>{error}</Text>
-            <Pressable style={styles.errorButton} onPress={() => router.replace('/')}>
+            <Pressable style={styles.errorButton} onPress={exitMatch}>
               <Text style={styles.errorButtonText}>Back to Home</Text>
             </Pressable>
           </View>
@@ -264,6 +279,8 @@ export default function GameScreen() {
       entering={FadeIn.duration(350)}
       style={[styles.screen, { paddingTop: insets.top, paddingBottom: insets.bottom }]}
     >
+      <ConnectionOverlay onExit={exitMatch} />
+
       {/* Countdown Overlay */}
       {roundState === 'countdown' && (
         <View style={styles.countdownOverlay}>
@@ -281,7 +298,7 @@ export default function GameScreen() {
       {/* Header */}
       <Animated.View entering={FadeIn.delay(200)} style={styles.header}>
         <View style={styles.headerLeft}>
-          <Pressable onPress={() => router.back()} style={styles.backButton}>
+          <Pressable onPress={exitMatch} style={styles.backButton}>
             <Ionicons name="close" size={24} color={Colors.primary} />
           </Pressable>
           <Text style={styles.roundCounter}>
@@ -478,10 +495,102 @@ export default function GameScreen() {
   );
 }
 
+/**
+ * Blocks the game with a clear message whenever the match can't safely go
+ * on: the opponent dropped (paused), left (over), never showed up (guest in
+ * a dead room), or this phone lost its own connection.
+ */
+function ConnectionOverlay({ onExit }: { onExit: () => void }) {
+  const opponentStatus = useGameStore((s) => s.opponentStatus);
+  const selfConnection = useGameStore((s) => s.selfConnection);
+  const isHost = useGameStore((s) => s.isHost);
+  const gameOver = useGameStore((s) => s.gameOver);
+  if (gameOver) return null;
+
+  const other = isHost ? 'Your opponent' : 'The host';
+  let icon: React.ComponentProps<typeof MaterialCommunityIcons>['name'];
+  let title: string;
+  let body: string;
+  let waiting = false;
+  let action: string;
+
+  if (opponentStatus === 'left') {
+    icon = 'account-off-outline';
+    title = `${other} left the match`;
+    body = "This match can't continue. No scores were recorded.";
+    action = 'Back to Home';
+  } else if (opponentStatus === 'ended') {
+    icon = 'timer-off-outline';
+    title = 'The match ended while you were away';
+    body = `${other} couldn't reach you for too long, so the match was stopped.`;
+    action = 'Back to Home';
+  } else if (selfConnection === 'reconnecting') {
+    icon = 'wifi-off';
+    title = "You're offline";
+    body = "Reconnecting… The match will pick up when you're back.";
+    waiting = true;
+    action = 'Leave match';
+  } else if (opponentStatus === 'reconnecting') {
+    icon = 'access-point-network-off';
+    title = `${other} lost connection`;
+    body = "The game is paused until they're back.";
+    waiting = true;
+    action = 'Leave match';
+  } else if (opponentStatus === 'absent') {
+    // Not final: clears as soon as the host opens the game screen.
+    icon = 'door-closed';
+    title = "The host hasn't opened the room yet";
+    body = "They may still be on the home screen, or they've left. Keep waiting or leave.";
+    waiting = true;
+    action = 'Leave';
+  } else {
+    return null;
+  }
+
+  return (
+    <Animated.View
+      entering={FadeIn.duration(200)}
+      exiting={FadeOut.duration(200)}
+      style={styles.connectionOverlay}
+    >
+      <View style={styles.connectionCard}>
+        <View style={styles.loadingPulse}>
+          <MaterialCommunityIcons name={icon} size={36} color={Colors.primary} />
+        </View>
+        <Text style={styles.loadingTitle}>{title}</Text>
+        <Text style={styles.loadingText}>{body}</Text>
+        {waiting ? <ActivityIndicator size="small" color={Colors.primary} /> : null}
+        <Pressable style={styles.errorButton} onPress={onExit}>
+          <Text style={styles.errorButtonText}>{action}</Text>
+        </Pressable>
+      </View>
+    </Animated.View>
+  );
+}
+
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
     backgroundColor: Colors.background,
+  },
+  connectionOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 200,
+    elevation: 200,
+    backgroundColor: 'rgba(0,0,0,0.82)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: Spacing.containerPadding,
+  },
+  connectionCard: {
+    width: '100%',
+    maxWidth: 360,
+    alignItems: 'center',
+    gap: Spacing.md,
+    paddingVertical: Spacing.xl,
+    paddingHorizontal: Spacing.lg,
+    borderRadius: BorderRadius.lg,
+    backgroundColor: Colors.surfaceContainerLow,
   },
   loadingBlock: {
     flex: 1,
