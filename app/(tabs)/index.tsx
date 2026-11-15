@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -165,6 +165,23 @@ export default function HomeScreen() {
       await challengeFriend(target);
     }
   };
+
+  // When a room ends (e.g. after a match the results screen clears it), Home
+  // must forget it too: it's a tab, so its local artist/panel state survives.
+  // Ignore the brief reset while a new room is being built for a new artist.
+  const prevRoomCode = useRef(roomCode);
+  useEffect(() => {
+    const had = prevRoomCode.current;
+    prevRoomCode.current = roomCode;
+    if (had && !roomCode && !useRoomStore.getState().creatingRoom) {
+      setChosenArtist(null);
+      setShowCreate(false);
+      setSearchActive(true);
+      setArtistQuery('');
+      setArtistMatches([]);
+      setCopied(false);
+    }
+  }, [roomCode]);
 
   // ─── Challenge a friend (no room code) ───────────────────────────────
   const params = useLocalSearchParams<{ challenge?: string; challengeName?: string }>();

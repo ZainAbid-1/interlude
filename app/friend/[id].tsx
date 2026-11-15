@@ -140,7 +140,12 @@ export default function FriendHeadToHead() {
                 {s.played > 0 ? (
                   <View style={styles.chipRow}>
                     <Chip text={verdict(s, theirName)} strong />
-                    {streakText(s, theirName) ? <Chip text={streakText(s, theirName)!} /> : null}
+                    {streakText(s, theirName) ? (
+                      <Chip
+                        text={streakText(s, theirName)!}
+                        icon={s.streak?.who === 'me' ? 'fire' : 'lightning-bolt'}
+                      />
+                    ) : null}
                   </View>
                 ) : (
                   <Text style={styles.emptyHero}>
@@ -263,14 +268,14 @@ export default function FriendHeadToHead() {
 // ─── Copy ────────────────────────────────────────────────────────────────
 
 function verdict(s: H2HSummary, them: string): string {
-  if (s.wins > s.losses) return s.wins - s.losses >= 3 ? `You own this rivalry 👑` : `You lead the rivalry`;
+  if (s.wins > s.losses) return s.wins - s.losses >= 3 ? `You own this rivalry` : `You lead the rivalry`;
   if (s.losses > s.wins) return s.losses - s.wins >= 3 ? `${them} owns this rivalry` : `${them} leads the rivalry`;
-  return `Dead even ⚖️`;
+  return `Dead even`;
 }
 
 function streakText(s: H2HSummary, them: string): string | null {
   if (!s.streak || s.streak.count < 2) return null;
-  if (s.streak.who === 'me') return `🔥 You've won ${s.streak.count} in a row`;
+  if (s.streak.who === 'me') return `You've won ${s.streak.count} in a row`;
   if (s.streak.who === 'them') return `${them} has won ${s.streak.count} straight`;
   return `${s.streak.count} draws in a row`;
 }
@@ -287,9 +292,20 @@ function timeAgo(iso: string): string {
 
 // ─── Pieces ──────────────────────────────────────────────────────────────
 
-function Chip({ text, strong }: { text: string; strong?: boolean }) {
+function Chip({
+  text,
+  strong,
+  icon,
+}: {
+  text: string;
+  strong?: boolean;
+  icon?: React.ComponentProps<typeof MaterialCommunityIcons>['name'];
+}) {
   return (
     <View style={[styles.chip, strong && styles.chipStrong]}>
+      {icon ? (
+        <MaterialCommunityIcons name={icon} size={13} color={strong ? '#000000' : '#ffffff'} />
+      ) : null}
       <Text style={[styles.chipText, strong && styles.chipTextStrong]} numberOfLines={1}>
         {text}
       </Text>
@@ -471,6 +487,9 @@ const styles = StyleSheet.create({
     marginTop: Spacing.md,
   },
   chip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: BorderRadius.full,

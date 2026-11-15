@@ -200,6 +200,9 @@ let gameChannel: RealtimeChannel | null = null;
 /** Head start given to a round so the broadcast reaches the guest before the
  *  countdown begins on both phones. */
 const ROUND_LEAD_MS = 500;
+/** Round 1 gets a longer head start: the guest has just arrived and still
+ *  needs to sync clocks, load the rounds and start the first clip download. */
+const ROUND1_LEAD_MS = 2000;
 
 /**
  * Clock sync. The host is the timekeeper; the guest estimates
@@ -559,6 +562,7 @@ function waitForOpponent(): Promise<void> {
 function resetSyncState() {
   clockOffsetMs = null;
   bestSyncRttMs = Infinity;
+  syncPromise = null;
   roundTiming = { index: 0, synced: false, startAtLocal: 0 };
   poolCache = null;
   earlyAnswers.clear();
@@ -643,7 +647,7 @@ export const useGameStore = create<GameState>((set, get) => ({
       // round_started_at is the moment the round-1 countdown begins, on the
       // host's clock. The guest converts it with its clock offset, so even the
       // DB/polling fallback path starts both phones together.
-      const startAtHost = Date.now() + ROUND_LEAD_MS;
+      const startAtHost = Date.now() + ROUND1_LEAD_MS;
       const { data: activated, error } = await supabase
         .from('rooms')
         .update({
@@ -1061,6 +1065,7 @@ function subscribeGameChannel(roomId: string, freshPresence = true) {
         const poolId = poolCache?.id ?? (await fetchRoom(roomId))?.track_pool_id;
         if (poolId) await loadRounds(roomId, poolId);
       }
+      await ensureClockSync();
       beginRound(payload.roundIndex, payload.startAtHost);
     })
     .on('broadcast', { event: 'cover-ready' }, ({ payload }) => {
@@ -1123,21 +1128,39 @@ function sendHello(reply: boolean) {
 }
 
 /** Guest: a short burst of pings to the host; the best sample wins. */
-let syncing = false;
-function runClockSync() {
-  if (syncing || useGameStore.getState().isHost) return;
-  syncing = true;
+let syncPromise: Promise<void> | null = null;
+function runClockSync(): Promise<void> {
+  if (useGameStore.getState().isHost) return Promise.resolve();
+  if (syncPromise) return syncPromise;
   const PINGS = 6;
-  for (let i = 0; i < PINGS; i++) {
+  syncPromise = new Promise<void>((resolve) => {
+    for (let i = 0; i < PINGS; i++) {
+      setTimeout(() => {
+        gameChannel?.send({
+          type: 'broadcast',
+          event: 'ping',
+          payload: { t0: Date.now(), from: useGameStore.getState().playerId },
+        });
+      }, i * 120);
+    }
+    // Leave time for the last pong to come back.
     setTimeout(() => {
-      gameChannel?.send({
-        type: 'broadcast',
-        event: 'ping',
-        payload: { t0: Date.now(), from: useGameStore.getState().playerId },
-      });
-      if (i === PINGS - 1) syncing = false;
-    }, i * 120);
-  }
+      syncPromise = null;
+      resolve();
+    }, PINGS * 120 + 400);
+  });
+  return syncPromise;
+}
+
+/**
+ * Guest: make sure we know the host's clock before scheduling a round.
+ * Without it, round 1 (which a direct challenge starts almost instantly)
+ * fell back to "start when the message arrives" and ran out of step with
+ * the host until the sync finished by round 2.
+ */
+async function ensureClockSync() {
+  if (useGameStore.getState().isHost || clockOffsetMs != null) return;
+  await Promise.race([runClockSync(), sleep(1500)]);
 }
 
 function sendAnswer(
@@ -1208,6 +1231,7 @@ async function loadRoundsFromRoom(room: any) {
   const loaded = await loadRounds(room.id, room.track_pool_id);
   if (loaded && room.status === 'active' && room.current_round >= 1) {
     clearAnswerPoll();
+    await ensureClockSync();
     beginRound(room.current_round, parseHostTime(room.round_started_at));
   }
 }

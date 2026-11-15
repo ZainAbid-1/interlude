@@ -356,7 +356,7 @@ async function collectSpotifyCandidates(
       if (byName.size >= cap) return;
       if (!t?.id || !t?.name) continue;
       if (requireArtist && !(t?.artists ?? []).some((a: any) => a?.id === artistId)) continue;
-      const key = normalizeName(t.name);
+      const key = baseTitle(t.name); // "Song" and "Song (Remix)" = one song
       if (!key || byName.has(key)) continue;
       byName.set(key, {
         id: t.id,
@@ -429,7 +429,7 @@ async function collectCandidates(
       // Only tracks actually credited to this artist.
       if (t?.artist?.id != null && String(t.artist.id) !== artistId) continue;
       const name: string = t?.title_short || t?.title || '';
-      const key = normalizeName(name);
+      const key = baseTitle(name);
       if (!key || byName.has(key)) continue;
       byName.set(key, {
         id: String(t.id),
@@ -470,19 +470,15 @@ async function fetchItunesPreviews(artistName: string): Promise<Map<string, stri
   for (const r of (data?.results ?? []) as any[]) {
     if (!r?.previewUrl || !r?.trackName) continue;
     if (!sameArtistName(artistName, r.artistName ?? '')) continue;
-    const key = normalizeName(r.trackName);
+    const key = baseTitle(r.trackName);
     if (key && !byName.has(key)) byName.set(key, r.previewUrl);
   }
   return byName;
 }
 
+/** Exact base-title lookup only; no fuzzy fallback (see sameTrackName). */
 function findItunesPreview(previews: Map<string, string>, trackName: string): string | null {
-  const exact = previews.get(normalizeName(trackName));
-  if (exact) return exact;
-  for (const [name, url] of previews) {
-    if (sameTrackName(trackName, name)) return url;
-  }
-  return null;
+  return previews.get(baseTitle(trackName)) ?? null;
 }
 
 /**
@@ -505,21 +501,46 @@ function normalizeName(value: string): string {
 }
 
 /**
- * True when `query` and `candidate` describe the same track title, allowing
- * small differences like "(Remastered)" or "feat. ..." suffixes.
+ * A title without decorations that vary between catalogs:
+ * "DOMINOS (feat. Talha Anjum)" → "dominos", "Song - Remastered 2011" →
+ * "song", "Track [Live]" → "track".
  */
-function sameTrackName(query: string, candidate: string): boolean {
-  const q = normalizeName(query);
-  const c = normalizeName(candidate);
-  if (!q || !c) return false;
-  return q === c || q.includes(c) || c.includes(q);
+function baseTitle(value: string): string {
+  const stripped = normalizeName(
+    value
+      .replace(/\s*[([][^)\]]*[)\]]/g, ' ')
+      .replace(/\s+-\s+.*$/, ' ')
+      .replace(/\s+(feat\.?|ft\.?|featuring)\s+.*$/i, ' ')
+  );
+  return stripped || normalizeName(value);
 }
 
-/** True when `query` and `candidate` are the same artist name. */
-function sameArtistName(query: string, candidate: string): boolean {
-  const q = normalizeName(query);
-  const c = normalizeName(candidate);
-  return !!q && !!c && (q === c || q.includes(c) || c.includes(q));
+/**
+ * Same song title? Exact match on the base title only. (It used to accept
+ * either title *containing* the other, so a song called "U" matched every
+ * title with a "u" in it and its clip played for unrelated rounds.)
+ */
+function sameTrackName(query: string, candidate: string): boolean {
+  const q = baseTitle(query);
+  return !!q && q === baseTitle(candidate);
+}
+
+/** Each artist in a credit like "Shareh, AHSAN & Umair" or "A feat. B". */
+function artistCredits(value: string): string[] {
+  return value
+    .split(/\s*(?:,|&|\+|\/|;|\s+x\s+|\s+and\s+|\bfeat\.?|\bft\.?|\bfeaturing\b|\bwith\b|\bvs\.?)\s*/i)
+    .map(normalizeName)
+    .filter(Boolean);
+}
+
+/**
+ * Is `artist` credited on `credit`? Exactly one of the credited names, or
+ * the whole credit, must equal it — "Umair Bin Abdullah" is not "Umair".
+ */
+function sameArtistName(artist: string, credit: string): boolean {
+  const a = normalizeName(artist);
+  if (!a) return false;
+  return normalizeName(credit) === a || artistCredits(credit).includes(a);
 }
 
 /**
@@ -634,6 +655,7 @@ export async function getArtistTrackPool(
     // Per-track iTunes lookups are rate limited, so cap them; after that,
     // Deezer (own preview, then a Deezer search) is the fallback.
     let itunesLookupsLeft = 8;
+    const usedPreviews = new Set<string>();
     const fill = async (list: DeezerCandidate[]) => {
       for (const track of list) {
         if (tracks.length >= limit) break;
@@ -654,6 +676,9 @@ export async function getArtistTrackPool(
           }
         }
         if (!preview) continue;
+        // Every round must have its own clip.
+        if (usedPreviews.has(preview.url)) continue;
+        usedPreviews.add(preview.url);
 
         chosen.add(track.id);
         tracks.push({

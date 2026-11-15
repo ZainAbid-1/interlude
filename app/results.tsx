@@ -19,6 +19,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { GlassCard } from '../components/GlassCard';
 import { useGameStore } from '../store/gameStore';
+import { useRoomStore } from '../store/roomStore';
+import { useInviteStore } from '../store/inviteStore';
 import {
   Relation,
   listFriends,
@@ -44,12 +46,24 @@ export default function ResultsScreen() {
   const playerWins = playerScore > opponentScore;
   const isDraw = playerScore === opponentScore;
 
-  const handlePlayAgain = () => {
+  /**
+   * The match is over: clear the game AND the room (its code and artist live
+   * in the room store, which Home reads), so Home starts fresh for both
+   * players instead of showing the finished room's code.
+   */
+  const leaveResults = () => {
+    useRoomStore.getState().resetRoom();
+    useInviteStore.getState().cancelOutgoing();
     router.replace('/');
     setTimeout(resetGame, 300);
   };
+  const handlePlayAgain = leaveResults;
 
-  const outcomeEmoji = isDraw ? '🤝' : playerWins ? '🏆' : '😔';
+  const outcomeIcon: React.ComponentProps<typeof MaterialCommunityIcons>['name'] = isDraw
+    ? 'handshake-outline'
+    : playerWins
+      ? 'trophy-outline'
+      : 'close-circle-outline';
   const outcomeText = isDraw
     ? "It's a Draw!"
     : playerWins
@@ -70,7 +84,9 @@ export default function ResultsScreen() {
           entering={ZoomIn.delay(200).duration(500)}
           style={styles.outcomeSection}
         >
-          <Text style={styles.outcomeEmoji}>{outcomeEmoji}</Text>
+          <View style={styles.outcomeIcon}>
+            <MaterialCommunityIcons name={outcomeIcon} size={48} color={Colors.primary} />
+          </View>
           <Text style={styles.outcomeText}>{outcomeText}</Text>
           <Text style={styles.outcomeSubtext}>
             {artistName} — {totalRounds} Rounds
@@ -166,10 +182,7 @@ export default function ResultsScreen() {
           {opponentId ? <AddFriendButton opponentId={opponentId} /> : null}
           <Pressable
             style={styles.secondaryButton}
-            onPress={() => {
-              router.replace('/');
-              setTimeout(resetGame, 300);
-            }}
+            onPress={leaveResults}
           >
             <Text style={styles.secondaryButtonText}>Back to Home</Text>
           </Pressable>
@@ -266,8 +279,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: Spacing.xl,
   },
-  outcomeEmoji: {
-    fontSize: 64,
+  outcomeIcon: {
+    width: 96,
+    height: 96,
+    borderRadius: 48,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.18)',
+    alignItems: 'center',
+    justifyContent: 'center',
     marginBottom: Spacing.md,
   },
   outcomeText: {

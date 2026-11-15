@@ -302,36 +302,65 @@ export default function FriendsScreen() {
                   </Text>
                 </View>
               ) : (
-                <View style={styles.list}>
-                  {accepted.map((f) => (
-                    <PlayerRow
-                      key={f.id}
-                      player={f}
-                      detail={recordText(f)}
-                      onPress={() => router.push(`/friend/${f.id}`)}
-                    >
-                      <View style={styles.rowActions}>
-                        <PillButton
-                          label="Play"
-                          icon="play"
-                          onPress={() =>
-                            router.navigate({
-                              pathname: '/(tabs)',
-                              params: { challenge: f.id, challengeName: nameOf(f) },
-                            })
-                          }
-                        />
+                <View style={styles.friendList}>
+                  {accepted.map((f, i) => (
+                    <View key={f.id} style={[styles.friendCard, i > 0 && styles.friendCardDivider]}>
+                      {/* Name gets the full width; tapping it also opens head-to-head. */}
+                      <Pressable onPress={() => router.push(`/friend/${f.id}`)}>
+                        <View style={styles.friendTop}>
+                          <PlayerAvatar
+                            uri={f.avatar_url}
+                            name={f.display_name || f.username}
+                            size={48}
+                          />
+                          <View style={styles.rowText}>
+                            <Text style={styles.friendName} numberOfLines={2}>
+                              {nameOf(f)}
+                            </Text>
+                            <Text style={styles.rowSub} numberOfLines={1}>
+                              @{f.username}
+                            </Text>
+                            <Text style={styles.friendRecord} numberOfLines={1}>
+                              {recordText(f)}
+                            </Text>
+                          </View>
+                        </View>
+                      </Pressable>
+
+                      {/* Every action is a labelled button, nothing hidden. */}
+                      <View style={styles.friendActions}>
+                        <View style={styles.flex1}>
+                          <WideButton
+                            label="Play"
+                            icon="play"
+                            primary
+                            onPress={() =>
+                              router.navigate({
+                                pathname: '/(tabs)',
+                                params: { challenge: f.id, challengeName: nameOf(f) },
+                              })
+                            }
+                          />
+                        </View>
+                        <View style={styles.flex1}>
+                          <WideButton
+                            label="Head to head"
+                            icon="stats-chart"
+                            onPress={() => router.push(`/friend/${f.id}`)}
+                          />
+                        </View>
                         <Pressable
                           onPress={() => confirmRemove(f)}
                           disabled={busy.has(f.id)}
                           hitSlop={6}
+                          accessibilityLabel={`More options for ${nameOf(f)}`}
                         >
-                          <View style={styles.iconButton}>
+                          <View style={styles.moreButton}>
                             <Ionicons name="ellipsis-horizontal" size={18} color={Colors.textSubtle} />
                           </View>
                         </Pressable>
                       </View>
-                    </PlayerRow>
+                    </View>
                   ))}
                 </View>
               )}
@@ -456,6 +485,44 @@ function PillButton({
             </Text>
           </>
         )}
+      </View>
+    </Pressable>
+  );
+}
+
+/** Full-width labelled button for the friend card's action bar. */
+function WideButton({
+  label,
+  icon,
+  onPress,
+  primary,
+}: {
+  label: string;
+  icon: React.ComponentProps<typeof Ionicons>['name'];
+  onPress: () => void;
+  primary?: boolean;
+}) {
+  const [pressed, setPressed] = useState(false);
+  const color = primary ? '#000000' : '#ffffff';
+  return (
+    <Pressable
+      onPress={onPress}
+      onPressIn={() => setPressed(true)}
+      onPressOut={() => setPressed(false)}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+    >
+      <View
+        style={[
+          styles.wideButton,
+          primary ? styles.pillPrimary : styles.pillMuted,
+          pressed && styles.pressed,
+        ]}
+      >
+        <Ionicons name={icon} size={15} color={color} />
+        <Text style={[styles.wideButtonText, { color }]} numberOfLines={1}>
+          {label}
+        </Text>
       </View>
     </Pressable>
   );
@@ -602,6 +669,63 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: Spacing.md,
     minHeight: 48,
+  },
+  friendList: {
+    gap: Spacing.md,
+  },
+  friendCard: {
+    gap: Spacing.md,
+  },
+  friendCardDivider: {
+    paddingTop: Spacing.md,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: 'rgba(255, 255, 255, 0.12)',
+  },
+  friendTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.md,
+  },
+  friendName: {
+    fontFamily: 'Inter-Bold',
+    fontSize: 16,
+    lineHeight: 21,
+    color: Colors.primary,
+  },
+  friendRecord: {
+    fontFamily: 'Inter',
+    fontSize: 12,
+    color: 'rgba(255, 255, 255, 0.75)',
+    marginTop: 3,
+  },
+  friendActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+  },
+  flex1: {
+    flex: 1,
+  },
+  wideButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    height: 40,
+    paddingHorizontal: 12,
+    borderRadius: BorderRadius.full,
+  },
+  wideButtonText: {
+    fontFamily: 'Inter-Bold',
+    fontSize: 14,
+  },
+  moreButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   rowInfoPress: {
     flex: 1,
