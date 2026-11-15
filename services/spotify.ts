@@ -1,8 +1,9 @@
 /**
  * Music catalog client — Spotify first, Deezer as the fallback.
  *
- * Artist search and track catalogs come from the Spotify Web API (Client
- * Credentials) when it is available: best catalog + current artist photos.
+ * Artist search and track catalogs come from the Spotify Web API — via the
+ * `spotify` Supabase Edge Function, which holds the client secret on the
+ * server — when it is available: best catalog + current artist photos.
  * Spotify refuses every call while the developer app's owner has no Premium
  * (HTTP 403 "Active premium subscription required for the owner of the
  * app"); on that, rate limiting or outages Spotify is put on a short
@@ -17,6 +18,8 @@
  * the `spotify_*` DB columns store whichever source produced the pool.
  */
 
+import { supabase } from '../lib/supabase';
+
 export interface SpotifyArtist {
   id: string;
   name: string;
@@ -28,19 +31,16 @@ export interface SpotifyArtist {
 
 // ─── Spotify ──────────────────────────────────────────────────────────
 
-const SPOTIFY_TOKEN_ENDPOINT = 'https://accounts.spotify.com/api/token';
-const SPOTIFY_API = 'https://api.spotify.com/v1';
-const CLIENT_ID = (process.env.EXPO_PUBLIC_SPOTIFY_CLIENT_ID ?? '').trim();
-const CLIENT_SECRET = (process.env.EXPO_PUBLIC_SPOTIFY_CLIENT_SECRET ?? '').trim();
-const hasSpotifyCredentials = CLIENT_ID.length > 0 && CLIENT_SECRET.length > 0;
+// Spotify is reached through the `spotify` Supabase Edge Function
+// (supabase/functions/spotify). The client secret lives there as a server
+// secret; it is never shipped in the app.
 
-/** After Spotify refuses (403/429/5xx), skip it for this long. */
+/** After Spotify refuses (403/429/5xx) or the proxy fails, skip it this long. */
 const SPOTIFY_COOLDOWN_MS = 5 * 60 * 1000;
 let spotifyDownUntil = 0;
-let cachedToken: { value: string; expiresAt: number } | null = null;
 
 function spotifyAvailable(): boolean {
-  return hasSpotifyCredentials && Date.now() >= spotifyDownUntil;
+  return supabase !== null && Date.now() >= spotifyDownUntil;
 }
 
 function markSpotifyDown(reason: string, ms = SPOTIFY_COOLDOWN_MS) {
@@ -48,92 +48,37 @@ function markSpotifyDown(reason: string, ms = SPOTIFY_COOLDOWN_MS) {
   console.warn(`[catalog] Spotify unavailable (${reason}); using Deezer for ${Math.round(ms / 1000)}s`);
 }
 
-const BASE64_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
-function base64Encode(input: string): string {
-  const bytes = Array.from(input).map((c) => c.charCodeAt(0) & 0xff);
-  let out = '';
-  for (let i = 0; i < bytes.length; i += 3) {
-    const [b1, b2, b3] = [bytes[i], bytes[i + 1], bytes[i + 2]];
-    out += BASE64_CHARS[b1 >> 2];
-    out += BASE64_CHARS[((b1 & 3) << 4) | ((b2 ?? 0) >> 4)];
-    out += b2 === undefined ? '=' : BASE64_CHARS[((b2 & 15) << 2) | ((b3 ?? 0) >> 6)];
-    out += b3 === undefined ? '=' : BASE64_CHARS[b3 & 63];
-  }
-  return out;
-}
-
-async function getSpotifyToken(): Promise<string | null> {
-  if (cachedToken && cachedToken.expiresAt > Date.now()) return cachedToken.value;
-  try {
-    const res = await fetch(SPOTIFY_TOKEN_ENDPOINT, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        Authorization: `Basic ${base64Encode(`${CLIENT_ID}:${CLIENT_SECRET}`)}`,
-      },
-      body: 'grant_type=client_credentials',
-    });
-    const data = await res.json();
-    if (!data?.access_token) {
-      markSpotifyDown(`auth ${res.status}`);
-      return null;
-    }
-    cachedToken = {
-      value: data.access_token,
-      expiresAt: Date.now() + ((data.expires_in ?? 3600) - 60) * 1000,
-    };
-    return cachedToken.value;
-  } catch (e) {
-    markSpotifyDown('auth request failed');
-    return null;
-  }
-}
-
 /**
- * GET a Spotify endpoint. Returns null on any failure. `critical` calls
- * (search) put Spotify on cooldown when refused; optional endpoints (top
- * tracks, albums) that may be restricted on their own just return null.
+ * GET a Spotify endpoint through the Edge Function. Returns null on any
+ * failure. `critical` calls (search) put Spotify on cooldown when refused or
+ * when the proxy can't be reached (e.g. not deployed yet), so the app falls
+ * back to Deezer; optional endpoints (top tracks, albums) that may be
+ * restricted on their own just return null.
  */
 async function spotifyGet(path: string, critical = true): Promise<any | null> {
-  if (!spotifyAvailable()) return null;
-  for (let attempt = 0; attempt < 2; attempt++) {
-    const token = await getSpotifyToken();
-    if (!token) return null;
-    try {
-      const res = await fetch(`${SPOTIFY_API}${path}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (res.ok) return await res.json();
-      if (res.status === 401 && attempt === 0) {
-        cachedToken = null; // expired token — refresh once and retry
-        continue;
-      }
-      if (critical) {
-        if (res.status === 429) {
-          const retryAfter = Number(res.headers.get('retry-after')) || 30;
-          markSpotifyDown('rate limited', retryAfter * 1000);
-        } else if (res.status === 403 || res.status >= 500) {
-          // Spotify sends this reason as plain text or as { error: { message } }.
-          let detail = '';
-          try {
-            const body = await res.text();
-            try {
-              detail = JSON.parse(body)?.error?.message ?? body;
-            } catch {
-              detail = body;
-            }
-          } catch {}
-          detail = detail.slice(0, 120);
-          markSpotifyDown(`${res.status} ${detail}`.trim());
-        }
-      }
-      return null;
-    } catch (e) {
-      if (critical) markSpotifyDown('request failed');
+  if (!spotifyAvailable() || !supabase) return null;
+  try {
+    const { data, error } = await supabase.functions.invoke('spotify', { body: { path } });
+    if (error || !data || typeof data.status !== 'number') {
+      if (critical) markSpotifyDown(`proxy unavailable${error?.message ? `: ${error.message}` : ''}`);
       return null;
     }
+    const { status, body } = data as { status: number; body: any };
+    if (status >= 200 && status < 300) return body;
+    if (critical) {
+      if (status === 429) {
+        markSpotifyDown('rate limited', (Number(body?.retryAfter) || 30) * 1000);
+      } else if (status === 403 || status >= 500) {
+        const inner = body?.body ?? body;
+        const detail = String(inner?.error?.message ?? inner?.error ?? inner ?? '').slice(0, 120);
+        markSpotifyDown(`${status} ${detail}`.trim());
+      }
+    }
+    return null;
+  } catch (e) {
+    if (critical) markSpotifyDown('request failed');
+    return null;
   }
-  return null;
 }
 
 /** Spotify ids are 22-character base62 strings. */

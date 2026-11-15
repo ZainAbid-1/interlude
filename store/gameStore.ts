@@ -1483,7 +1483,41 @@ async function advanceRoomRound() {
 async function finalizeMatch() {
   const state = useGameStore.getState();
 
-  // Authoritative scores from DB.
+  // Any answer that failed to save while offline must land first.
+  await flushPendingWrites();
+
+  // finalize_match (supabase/security.sql) totals both players from the
+  // server-graded answers, writes match_results and completes the room.
+  const { data: final, error: finalErr } = await supabase!.rpc('finalize_match', {
+    p_room: state.roomId,
+  });
+  if (!finalErr && Array.isArray(final)) {
+    const rows = final as Array<{
+      player_id: string;
+      total_score: number;
+      correct_count: number;
+      outcome: string | null;
+    }>;
+    const mine = rows.find((r) => r.player_id === state.playerId);
+    const theirs = rows.find((r) => r.player_id !== state.playerId);
+    useGameStore.setState({
+      opponentId: theirs?.player_id ?? state.opponentId,
+      playerScore: mine?.total_score ?? state.playerScore,
+      opponentScore: theirs?.total_score ?? state.opponentScore,
+      playerCorrectCount: mine?.correct_count ?? state.playerCorrectCount,
+      opponentCorrectCount: theirs?.correct_count ?? state.opponentCorrectCount,
+      gameOver: true,
+    });
+    return;
+  }
+  if (finalErr && finalErr.code !== 'PGRST202') {
+    // Server refused (e.g. not a player): show what we have locally.
+    console.warn('[game] finalize failed', finalErr.message);
+    useGameStore.setState({ gameOver: true });
+    return;
+  }
+
+  // Legacy path, only until security.sql has been run.
   const room = await fetchRoom(state.roomId);
   if (room) {
     // The host's opponentId was captured before the guest joined (null);

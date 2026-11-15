@@ -166,6 +166,27 @@ export async function joinRoom(
   const normalized = code.trim().toUpperCase();
   if (!normalized) return { error: 'Enter a room code' };
 
+  // join_room (supabase/security.sql) checks the room and claims the guest
+  // seat atomically on the server; players can't read or edit rooms they
+  // aren't in.
+  const joined = await supabase.rpc('join_room', { p_code: normalized });
+  if (!joined.error && joined.data) {
+    const room = joined.data as RoomRecord;
+    const poolResult = await loadPool(room.track_pool_id);
+    if ('error' in poolResult) return { error: poolResult.error };
+    return {
+      room,
+      artist: poolResult.artist,
+      tracks: poolResult.tracks,
+      options: poolResult.options,
+    };
+  }
+  // Anything other than "function not deployed yet" is the real answer.
+  if (joined.error && joined.error.code !== 'PGRST202') {
+    return { error: joined.error.message };
+  }
+
+  // Legacy path, only until security.sql has been run.
   const { data: room, error: roomErr } = await supabase
     .from('rooms')
     .select('*')
