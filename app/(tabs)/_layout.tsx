@@ -1,5 +1,6 @@
 import React from 'react';
-import { Tabs } from 'expo-router';
+import { Tabs, Redirect } from 'expo-router';
+import { useAuthStore } from '../../store/authStore';
 import { View, StyleSheet, Pressable } from 'react-native';
 import { BlurView } from 'expo-blur';
 import { MaterialCommunityIcons, Ionicons } from '@expo/vector-icons';
@@ -12,6 +13,14 @@ import { Colors, Spacing, BorderRadius } from '../../constants/theme';
  * - Inactive tabs: semi-transparent icons
  */
 export default function TabLayout() {
+  // Everyone needs a unique @username before using the app (friends search
+  // relies on it). Exactly null = not picked yet; undefined = the server
+  // isn't set up for usernames, so don't block on a picker that can't save.
+  const profile = useAuthStore((s) => s.profile);
+  if (profile && profile.username === null) {
+    return <Redirect href="/username" />;
+  }
+
   return (
     <Tabs
       screenOptions={{

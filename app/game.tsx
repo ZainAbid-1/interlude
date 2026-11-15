@@ -28,6 +28,7 @@ import { AnswerButton } from '../components/AnswerButton';
 import { ProgressBar } from '../components/ProgressBar';
 import { useGameStore, ROUND_DURATION_MS, getRoundStartAt } from '../store/gameStore';
 import { useRoomStore } from '../store/roomStore';
+import { useInviteStore } from '../store/inviteStore';
 import { useClipPlayback, CLIP_DURATION_MS } from '../hooks/useClipPlayback';
 import { Colors, Spacing, BorderRadius } from '../constants/theme';
 
@@ -123,13 +124,55 @@ export default function GameScreen() {
       if (timerRef.current) clearInterval(timerRef.current);
       // Leaving the screen any way (✕, Android back) mid-match tells the
       // opponent immediately; after game over the results screen takes over.
-      if (!useGameStore.getState().gameOver) useGameStore.getState().leaveMatch();
+      if (!useGameStore.getState().gameOver) {
+        useInviteStore.getState().cancelOutgoing();
+        useGameStore.getState().leaveMatch();
+      }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roomId]);
 
+  // ─── Host lobby: live status of a friend challenge ───────────────────
+  const roomCode = useRoomStore((s) => s.roomCode);
+  const outgoing = useInviteStore((s) => s.outgoing);
+  const [lobbyNow, setLobbyNow] = useState(Date.now());
+  useEffect(() => {
+    if (outgoing?.status !== 'pending') return;
+    const t = setInterval(() => setLobbyNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [outgoing?.status]);
+
+  // Match started: the challenge did its job.
+  useEffect(() => {
+    if (currentRound && useInviteStore.getState().outgoing) {
+      useInviteStore.setState({ outgoing: null });
+    }
+  }, [currentRound]);
+
+  const lobby = (() => {
+    const name = outgoing?.toName ?? 'your friend';
+    const left = Math.max(0, (outgoing?.expiresAt ?? 0) - lobbyNow);
+    const clock = `${Math.floor(left / 60000)}:${Math.floor((left % 60000) / 1000)
+      .toString()
+      .padStart(2, '0')}`;
+    switch (outgoing?.status) {
+      case 'pending':
+        return { icon: 'send' as const, title: `Waiting for ${name}`, text: `Challenge sent · expires in ${clock}`, spinner: true };
+      case 'accepted':
+        return { icon: 'account-check-outline' as const, title: `${name} is joining…`, text: 'Get ready!', spinner: true };
+      case 'declined':
+        return { icon: 'account-cancel-outline' as const, title: `${name} declined`, text: 'Challenge someone else, or share your room code.', spinner: false };
+      case 'expired':
+        return { icon: 'timer-sand-empty' as const, title: `${name} didn't answer`, text: 'The challenge expired. Share your room code or try again.', spinner: false };
+      default:
+        return { icon: 'account-plus-outline' as const, title: 'Waiting for your opponent', text: 'Share your room code to get playing', spinner: true };
+    }
+  })();
+
   /** Leave mid-match: tell the opponent, drop the room, go home. */
   const exitMatch = useCallback(() => {
+    // A pending challenge must not let a friend join a dead room.
+    useInviteStore.getState().cancelOutgoing();
     useGameStore.getState().leaveMatch();
     // A match that already started can't be rejoined; the lobby keeps its
     // room so the host can still share the code.
@@ -250,24 +293,39 @@ export default function GameScreen() {
           >
             <View style={styles.loadingPulse}>
               <MaterialCommunityIcons
-                name={isHost ? 'account-plus-outline' : 'headphones'}
+                name={
+                  !isHost
+                    ? 'headphones'
+                    : lobby.icon
+                }
                 size={40}
                 color={Colors.primary}
               />
             </View>
             <Text style={styles.loadingTitle}>
-              {isHost
-                ? 'Waiting for your opponent'
-                : 'Waiting for the host'}
+              {isHost ? lobby.title : 'Waiting for the host'}
             </Text>
             <Text style={styles.loadingText}>
               {loading
                 ? 'Preparing the match...'
                 : isHost
-                  ? 'Share your room code to get playing'
+                  ? lobby.text
                   : 'The host will start the match soon...'}
             </Text>
-            <ActivityIndicator size="small" color={Colors.primary} />
+            {lobby.spinner || !isHost ? (
+              <ActivityIndicator size="small" color={Colors.primary} />
+            ) : null}
+            {isHost && roomCode ? (
+              <View style={styles.lobbyCode}>
+                <Text style={styles.lobbyCodeLabel}>ROOM CODE</Text>
+                <Text style={styles.lobbyCodeText}>{roomCode}</Text>
+              </View>
+            ) : null}
+            <Pressable onPress={exitMatch} hitSlop={8}>
+              <View style={styles.errorButton}>
+                <Text style={styles.errorButtonText}>Leave lobby</Text>
+              </View>
+            </Pressable>
           </Animated.View>
         )}
       </View>
@@ -572,6 +630,23 @@ const styles = StyleSheet.create({
   screen: {
     flex: 1,
     backgroundColor: Colors.background,
+  },
+  lobbyCode: {
+    alignItems: 'center',
+    gap: 2,
+    marginTop: Spacing.sm,
+  },
+  lobbyCodeLabel: {
+    fontFamily: 'Inter-Bold',
+    fontSize: 10,
+    letterSpacing: 1.5,
+    color: Colors.textSubtle,
+  },
+  lobbyCodeText: {
+    fontFamily: 'Inter-Bold',
+    fontSize: 24,
+    letterSpacing: 6,
+    color: Colors.primary,
   },
   connectionOverlay: {
     ...StyleSheet.absoluteFillObject,

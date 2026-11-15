@@ -1462,6 +1462,11 @@ async function finalizeMatch() {
   // Authoritative scores from DB.
   const room = await fetchRoom(state.roomId);
   if (room) {
+    // The host's opponentId was captured before the guest joined (null);
+    // the room row at match end always has both players.
+    const opponentId: string | null =
+      (state.isHost ? room.guest_id : room.host_id) ?? state.opponentId;
+    if (opponentId !== state.opponentId) useGameStore.setState({ opponentId });
     const { data } = await supabase!
       .from('round_answers')
       .select('player_id, is_correct, points_awarded, response_ms')
@@ -1512,11 +1517,11 @@ async function finalizeMatch() {
         },
         { onConflict: 'room_id,player_id' }
       );
-      if (state.opponentId) {
+      if (opponentId) {
         await supabase!.from('match_results').upsert(
           {
             room_id: state.roomId,
-            player_id: state.opponentId,
+            player_id: opponentId,
             total_score: oScore,
             correct_count: oCorrect,
             avg_response_ms: avg(oTimes),

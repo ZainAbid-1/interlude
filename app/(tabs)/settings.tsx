@@ -84,8 +84,13 @@ export default function SettingsScreen() {
               )}
               <View style={styles.profileInfo}>
                 <Text style={styles.displayName} numberOfLines={1}>
-                  {profile?.display_name ?? 'Not Signed In'}
+                  {profile?.display_name ?? (profile?.username ? `@${profile.username}` : 'Not Signed In')}
                 </Text>
+                {profile?.username ? (
+                  <Text style={styles.usernameText} numberOfLines={1}>
+                    @{profile.username}
+                  </Text>
+                ) : null}
                 <View style={styles.badgeRow}>
                   {session ? (
                     <View style={styles.providerBadge}>
@@ -103,6 +108,28 @@ export default function SettingsScreen() {
             </View>
           </GlassCard>
         </Animated.View>
+
+        {/* Username */}
+        {isLoggedIn && profile?.username !== undefined ? (
+          <Animated.View entering={FadeInDown.delay(250).duration(500)}>
+            <Pressable onPress={() => router.push('/username?edit=1')}>
+              <GlassCard borderRadius={24} padding={20}>
+                <View style={styles.settingRow}>
+                  <View style={styles.settingIcon}>
+                    <Ionicons name="at" size={20} color={WARM_GOLD} />
+                  </View>
+                  <View style={styles.profileInfo}>
+                    <Text style={styles.settingTitle}>Change username</Text>
+                    <Text style={styles.settingHint} numberOfLines={1}>
+                      Friends find you by @{profile?.username ?? '…'}
+                    </Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={18} color={Colors.textSubtle} />
+                </View>
+              </GlassCard>
+            </Pressable>
+          </Animated.View>
+        ) : null}
 
         {/* Log Out / Sign In Action */}
         <Animated.View
@@ -214,6 +241,37 @@ const styles = StyleSheet.create({
     fontSize: 18,
     color: '#ffffff',
     marginBottom: 4,
+  },
+  usernameText: {
+    fontFamily: 'Inter',
+    fontSize: 13,
+    color: 'rgba(255, 255, 255, 0.7)',
+    marginTop: -2,
+    marginBottom: 6,
+  },
+  settingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.md,
+  },
+  settingIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  settingTitle: {
+    fontFamily: 'Inter-Bold',
+    fontSize: 15,
+    color: '#ffffff',
+  },
+  settingHint: {
+    fontFamily: 'Inter',
+    fontSize: 13,
+    color: Colors.textMuted,
+    marginTop: 2,
   },
   badgeRow: {
     flexDirection: 'row',

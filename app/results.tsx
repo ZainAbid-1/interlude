@@ -1,10 +1,12 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   ScrollView,
   Pressable,
+  ActivityIndicator,
+  Alert,
 } from 'react-native';
 import { router } from 'expo-router';
 import Animated, {
@@ -17,6 +19,12 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { GlassCard } from '../components/GlassCard';
 import { useGameStore } from '../store/gameStore';
+import {
+  Relation,
+  listFriends,
+  respondFriendRequest,
+  sendFriendRequest,
+} from '../services/friends';
 import { Colors, Spacing, BorderRadius } from '../constants/theme';
 
 export default function ResultsScreen() {
@@ -30,6 +38,7 @@ export default function ResultsScreen() {
     roundResults,
     artistName,
     resetGame,
+    opponentId,
   } = useGameStore();
 
   const playerWins = playerScore > opponentScore;
@@ -154,6 +163,7 @@ export default function ResultsScreen() {
             />
             <Text style={styles.primaryButtonText}>Play Again</Text>
           </Pressable>
+          {opponentId ? <AddFriendButton opponentId={opponentId} /> : null}
           <Pressable
             style={styles.secondaryButton}
             onPress={() => {
@@ -169,7 +179,79 @@ export default function ResultsScreen() {
   );
 }
 
+/**
+ * Add the opponent you just played. Starts from the real relationship so it
+ * never offers "Add" to an existing friend, and accepts if they asked first.
+ * Hidden when the friends feature isn't set up on the server.
+ */
+function AddFriendButton({ opponentId }: { opponentId: string }) {
+  const [relation, setRelation] = useState<Relation | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    listFriends().then((res) => {
+      if (cancelled || res.error) return;
+      const row = (res.data ?? []).find((f) => f.id === opponentId);
+      setRelation(row?.relation ?? 'none');
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [opponentId]);
+
+  if (!relation) return null;
+
+  const onPress = async () => {
+    if (relation === 'friend' || relation === 'outgoing') return;
+    setBusy(true);
+    const res =
+      relation === 'incoming'
+        ? await respondFriendRequest(opponentId, true)
+        : await sendFriendRequest(opponentId);
+    setBusy(false);
+    if (res.error) Alert.alert('Could not add friend', res.error);
+    else if (res.data) setRelation(res.data);
+  };
+
+  const label =
+    relation === 'friend'
+      ? 'Friends'
+      : relation === 'outgoing'
+        ? 'Friend request sent'
+        : relation === 'incoming'
+          ? 'Accept friend request'
+          : 'Add as friend';
+  const icon =
+    relation === 'friend' || relation === 'outgoing' ? 'checkmark' : 'person-add-outline';
+
+  return (
+    <Pressable
+      style={[styles.secondaryButton, styles.friendButton]}
+      onPress={onPress}
+      disabled={busy || relation === 'friend' || relation === 'outgoing'}
+    >
+      {busy ? (
+        <ActivityIndicator size="small" color={Colors.primary} />
+      ) : (
+        <>
+          <Ionicons name={icon} size={18} color={Colors.primary} />
+          <Text style={[styles.secondaryButtonText, styles.friendButtonText]}>{label}</Text>
+        </>
+      )}
+    </Pressable>
+  );
+}
+
 const styles = StyleSheet.create({
+  friendButton: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  friendButtonText: {
+    color: Colors.primary,
+  },
   screen: {
     flex: 1,
     backgroundColor: Colors.background,

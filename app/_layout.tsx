@@ -17,6 +17,8 @@ import * as SplashScreen from 'expo-splash-screen';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { Colors } from '../constants/theme';
 import { useAuthStore } from '../store/authStore';
+import { useInviteStore } from '../store/inviteStore';
+import { GameInviteBanner } from '../components/GameInviteBanner';
 
 // Keep splash visible until fonts load
 SplashScreen.preventAutoHideAsync().catch(() => {});
@@ -37,6 +39,14 @@ export default function RootLayout() {
     const unsubscribe = hydrate();
     return unsubscribe;
   }, [hydrate]);
+
+  // Listen for friend challenges while signed in, on any screen.
+  const userId = useAuthStore((s) => s.session?.user?.id);
+  useEffect(() => {
+    if (!userId) return;
+    useInviteStore.getState().start(userId);
+    return () => useInviteStore.getState().stop();
+  }, [userId]);
 
   useEffect(() => {
     if (fontsLoaded) {
@@ -61,6 +71,8 @@ export default function RootLayout() {
         <Stack.Screen name="index" />
         <Stack.Screen name="login" />
         <Stack.Screen name="(tabs)" />
+        <Stack.Screen name="username" options={{ gestureEnabled: false }} />
+        <Stack.Screen name="friend/[id]" />
         <Stack.Screen
           name="game"
           options={{
@@ -76,6 +88,7 @@ export default function RootLayout() {
           }}
         />
       </Stack>
+      <GameInviteBanner />
     </GestureHandlerRootView>
   );
 }

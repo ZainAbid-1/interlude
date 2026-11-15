@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -14,7 +14,10 @@ import {
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
-import { router } from 'expo-router';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { PlayerAvatar } from '../../components/PlayerAvatar';
+import { listFriends, Friend } from '../../services/friends';
+import { useInviteStore } from '../../store/inviteStore';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -153,7 +156,52 @@ export default function HomeScreen() {
     const res = await createRoom(artist);
     if (!res.ok) {
       Alert.alert('Could not create room', res.error ?? 'Something went wrong');
+      return;
     }
+    // Came here from a friend's "Play" button: challenge them right away.
+    if (pendingChallenge) {
+      const target = pendingChallenge;
+      setPendingChallenge(null);
+      await challengeFriend(target);
+    }
+  };
+
+  // ─── Challenge a friend (no room code) ───────────────────────────────
+  const params = useLocalSearchParams<{ challenge?: string; challengeName?: string }>();
+  const [pendingChallenge, setPendingChallenge] = useState<{ id: string; name: string } | null>(null);
+  const [friendsToInvite, setFriendsToInvite] = useState<Friend[]>([]);
+  const [invitingId, setInvitingId] = useState<string | null>(null);
+
+  useFocusEffect(
+    useCallback(() => {
+      listFriends().then((res) => {
+        if (!res.error) setFriendsToInvite((res.data ?? []).filter((f) => f.relation === 'friend'));
+      });
+    }, [])
+  );
+
+  // Friends tab → "Play": open the create panel and remember who to invite.
+  useEffect(() => {
+    if (!params.challenge) return;
+    setPendingChallenge({ id: params.challenge, name: params.challengeName || 'your friend' });
+    setShowCreate(true);
+    setSearchActive(true);
+    router.setParams({ challenge: undefined, challengeName: undefined });
+  }, [params.challenge, params.challengeName]);
+
+  const challengeFriend = async (friend: { id: string; name: string }) => {
+    const ok = await ensureRoom();
+    const roomId = useRoomStore.getState().roomId;
+    if (!ok || !roomId) return;
+    setInvitingId(friend.id);
+    const res = await useInviteStore.getState().invite(friend, roomId);
+    setInvitingId(null);
+    if (res.error) {
+      Alert.alert("Couldn't send the challenge", res.error);
+      return;
+    }
+    // Into the lobby: the match starts the moment they tap Join.
+    router.push('/game');
   };
 
   const handleJoinRoom = async () => {
@@ -369,15 +417,80 @@ export default function HomeScreen() {
 
               <View style={styles.divider} />
 
+              {/* Challenge a friend: one tap, no code */}
+              {pendingChallenge ? (
+                <View style={styles.challengeBanner}>
+                  <Ionicons name="flash" size={16} color="#000000" />
+                  <Text style={styles.challengeBannerText} numberOfLines={2}>
+                    Challenging {pendingChallenge.name}. Pick an artist to send it.
+                  </Text>
+                  <Pressable onPress={() => setPendingChallenge(null)} hitSlop={8}>
+                    <Ionicons name="close" size={16} color="#000000" />
+                  </Pressable>
+                </View>
+              ) : null}
+
+              {friendsToInvite.length > 0 ? (
+                <>
+                  <View style={styles.inviteHeaderRow}>
+                    <View style={styles.inviteIconRing}>
+                      <Ionicons name="flash-outline" size={18} color={WARM_GOLD} />
+                    </View>
+                    <View style={styles.inviteHeaderText}>
+                      <Text style={styles.inviteLabel}>Challenge a friend</Text>
+                      <Text style={styles.inviteHint}>
+                        {roomCode ? 'They get a pop-up and join with one tap' : 'Pick an artist first'}
+                      </Text>
+                    </View>
+                  </View>
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={styles.friendChips}
+                    style={styles.friendChipsScroll}
+                  >
+                    {friendsToInvite.map((f) => {
+                      const name = f.display_name?.split(' ')[0] || f.username;
+                      const disabled = !roomCode || creatingRoom || invitingId !== null;
+                      return (
+                        <Pressable
+                          key={f.id}
+                          disabled={disabled}
+                          onPress={() => challengeFriend({ id: f.id, name: f.display_name || `@${f.username}` })}
+                        >
+                          <View style={[styles.friendChip, disabled && styles.friendChipDisabled]}>
+                            <PlayerAvatar uri={f.avatar_url} name={name} size={48} />
+                            <Text style={styles.friendChipName} numberOfLines={1}>
+                              {name}
+                            </Text>
+                            <View style={styles.friendChipPill}>
+                              {invitingId === f.id ? (
+                                <ActivityIndicator size="small" color="#000000" />
+                              ) : (
+                                <>
+                                  <Ionicons name="play" size={11} color="#000000" />
+                                  <Text style={styles.friendChipPillText}>Play</Text>
+                                </>
+                              )}
+                            </View>
+                          </View>
+                        </Pressable>
+                      );
+                    })}
+                  </ScrollView>
+                  <View style={styles.divider} />
+                </>
+              ) : null}
+
               {/* Invite */}
               <View style={styles.inviteHeaderRow}>
                 <View style={styles.inviteIconRing}>
                   <Ionicons name="key-outline" size={18} color={WARM_GOLD} />
                 </View>
                 <View style={styles.inviteHeaderText}>
-                  <Text style={styles.inviteLabel}>Invite a friend</Text>
+                  <Text style={styles.inviteLabel}>Room code</Text>
                   <Text style={styles.inviteHint}>
-                    Share your room code to start playing
+                    Or share the code with anyone
                   </Text>
                 </View>
               </View>
@@ -1033,6 +1146,65 @@ const styles = StyleSheet.create({
   },
   copyButton: {
     paddingLeft: Spacing.sm,
+  },
+  challengeBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    backgroundColor: '#ffffff',
+    borderRadius: BorderRadius.md,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: 10,
+    marginBottom: Spacing.md,
+  },
+  challengeBannerText: {
+    flex: 1,
+    fontFamily: 'Inter-Bold',
+    fontSize: 13,
+    color: '#000000',
+  },
+  friendChipsScroll: {
+    marginHorizontal: -Spacing.containerPadding,
+    marginBottom: Spacing.md,
+  },
+  friendChips: {
+    gap: Spacing.sm,
+    paddingHorizontal: Spacing.containerPadding,
+  },
+  friendChip: {
+    width: 84,
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: Spacing.sm,
+    borderRadius: BorderRadius.lg,
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    borderWidth: 1,
+    borderColor: Colors.glassBorder,
+  },
+  friendChipDisabled: {
+    opacity: 0.4,
+  },
+  friendChipName: {
+    maxWidth: 76,
+    fontFamily: 'Inter-Bold',
+    fontSize: 12,
+    color: '#ffffff',
+  },
+  friendChipPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    minWidth: 52,
+    height: 24,
+    justifyContent: 'center',
+    paddingHorizontal: 8,
+    borderRadius: BorderRadius.full,
+    backgroundColor: '#ffffff',
+  },
+  friendChipPillText: {
+    fontFamily: 'Inter-Bold',
+    fontSize: 11,
+    color: '#000000',
   },
   inviteButtonsRow: {
     flexDirection: 'row',
