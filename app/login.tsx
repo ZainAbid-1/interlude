@@ -6,8 +6,9 @@ import {
   StyleSheet,
   ActivityIndicator,
   Alert,
-  Dimensions,
+  useWindowDimensions,
 } from 'react-native';
+import { WORDMARK_TEXT, wordmarkFontSize } from '../constants/wordmark';
 import { useRouter } from 'expo-router';
 import Animated, { FadeInDown, FadeInUp } from 'react-native-reanimated';
 import { Ionicons } from '@expo/vector-icons';
@@ -15,15 +16,20 @@ import { AlbumCollageBackground } from '../components/AlbumCollageBackground';
 import { useAuthStore } from '../store/authStore';
 import { Colors, Spacing, BorderRadius } from '../constants/theme';
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
-// Scale the wordmark so "INTERLUDE." always fits in full on small screens.
-const TITLE_FONT_SIZE = Math.min(58, SCREEN_WIDTH * 0.14);
-const TITLE_LETTER_SPACING = Math.min(6, SCREEN_WIDTH * 0.012);
+// The wordmark is sized from the live window width so "INTERLUDE." always
+// fits on one line, whatever the phone or its font-size setting.
+function titleLayout(windowWidth: number) {
+  const letterSpacing = Math.min(6, windowWidth * 0.012);
+  const size = wordmarkFontSize(windowWidth - Spacing.gutter * 2 - 8, letterSpacing, 58);
+  return { size, letterSpacing };
+}
 
 export default function LoginScreen() {
   const router = useRouter();
   const signInWithGoogle = useAuthStore((s) => s.signInWithGoogle);
   const [signingIn, setSigningIn] = useState(false);
+  const { width: windowWidth } = useWindowDimensions();
+  const title = titleLayout(windowWidth);
 
   const handleGoogleSignIn = async () => {
     setSigningIn(true);
@@ -48,7 +54,18 @@ export default function LoginScreen() {
       <View style={styles.content}>
         {/* Title in exact Antonio font in the middle of the screen */}
         <Animated.View entering={FadeInDown.delay(100).duration(800)} style={styles.titleContainer}>
-          <Text style={styles.title}>INTERLUDE.</Text>
+          <Text
+            style={[
+              styles.title,
+              { fontSize: title.size, letterSpacing: title.letterSpacing, lineHeight: Math.round(title.size * 1.12) },
+            ]}
+            numberOfLines={1}
+            allowFontScaling={false}
+            adjustsFontSizeToFit
+            minimumFontScale={0.6}
+          >
+            {WORDMARK_TEXT}
+          </Text>
         </Animated.View>
 
         {/* Google sign-in link / button */}
@@ -99,12 +116,9 @@ const styles = StyleSheet.create({
   },
   title: {
     fontFamily: 'Antonio',
-    fontSize: TITLE_FONT_SIZE,
     color: '#ffffff',
-    letterSpacing: TITLE_LETTER_SPACING,
     textTransform: 'uppercase',
     textAlign: 'center',
-    lineHeight: TITLE_FONT_SIZE * 1.12,
     textShadowColor: 'rgba(255, 255, 255, 0.35)',
     textShadowOffset: { width: 0, height: 4 },
     textShadowRadius: 16,

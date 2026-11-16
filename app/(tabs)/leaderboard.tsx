@@ -36,14 +36,17 @@ export default function LeaderboardScreen() {
 
   const [scope, setScope] = useState<Scope>('friends');
   const [period, setPeriod] = useState<Period>('all');
-  const [artistKey, setArtistKey] = useState<string | null>(null);
+  // The chosen artist itself (not looked up from the chip list), so the
+  // headings never fall back to "All artists" while showing an artist board.
+  const [selected, setSelected] = useState<LeaderboardArtist | null>(null);
+  const artistKey = selected?.artist_key ?? null;
 
+  // Chips are always the all-time list: switching the period only changes
+  // the board, never which artists you can pick.
   const [artists, setArtists] = useState<LeaderboardArtist[]>([]);
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [searchResults, setSearchResults] = useState<LeaderboardArtist[] | null>(null);
-  // Keeps a searched artist visible as a chip after the search closes.
-  const [pinnedArtist, setPinnedArtist] = useState<LeaderboardArtist | null>(null);
 
   const [rows, setRows] = useState<LeaderboardRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -55,9 +58,9 @@ export default function LeaderboardScreen() {
   const searchReq = useRef(0);
 
   const loadArtists = useCallback(async () => {
-    const res = await listLeaderboardArtists(period);
+    const res = await listLeaderboardArtists('all');
     if (res.data) setArtists(res.data);
-  }, [period]);
+  }, []);
 
   const loadBoard = useCallback(async () => {
     const id = ++boardReq.current;
@@ -65,7 +68,7 @@ export default function LeaderboardScreen() {
     const res = await getLeaderboard(artistKey, scope, period);
     if (id !== boardReq.current) return;
     if (res.error) {
-      setError(res.error);
+      setError(/permission denied/i.test(res.error) ? 'Sign in to see the leaderboard.' : res.error);
       setRows([]);
     } else {
       setRows(res.data ?? []);
@@ -98,11 +101,11 @@ export default function LeaderboardScreen() {
     }
     const id = ++searchReq.current;
     const t = setTimeout(async () => {
-      const res = await listLeaderboardArtists(period, q);
+      const res = await listLeaderboardArtists('all', q);
       if (id === searchReq.current) setSearchResults(res.data ?? []);
     }, 300);
     return () => clearTimeout(t);
-  }, [query, period]);
+  }, [query]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -111,19 +114,16 @@ export default function LeaderboardScreen() {
   }, [loadArtists, loadBoard]);
 
   const pickArtist = (a: LeaderboardArtist | null) => {
-    setArtistKey(a?.artist_key ?? null);
-    if (a && !artists.some((x) => x.artist_key === a.artist_key)) setPinnedArtist(a);
+    setSelected(a);
     setSearchOpen(false);
     setQuery('');
   };
 
+  // A searched artist that isn't in the usual list stays visible as a chip.
   const chipList: LeaderboardArtist[] = [
-    ...(pinnedArtist && !artists.some((x) => x.artist_key === pinnedArtist.artist_key)
-      ? [pinnedArtist]
-      : []),
+    ...(selected && !artists.some((x) => x.artist_key === selected.artist_key) ? [selected] : []),
     ...artists,
   ];
-  const selected = chipList.find((a) => a.artist_key === artistKey) ?? null;
   const me = rows.find((r) => r.is_me) ?? null;
   const others = rows.filter((r) => !r.is_me || r.rank <= rowsBeforeGap(rows));
   const pinnedMe = me && !others.includes(me) ? me : null;
@@ -161,7 +161,7 @@ export default function LeaderboardScreen() {
             value={period}
             onChange={setPeriod}
             options={[
-              { value: 'week', label: 'This week' },
+              { value: 'week', label: 'Last 7 days' },
               { value: 'all', label: 'All time' },
             ]}
           />
@@ -254,10 +254,10 @@ export default function LeaderboardScreen() {
                   <Text style={styles.youSub}>
                     {me
                       ? `Your best ${fmt(me.score)}  ·  #${me.rank} of ${me.total}`
-                      : `You haven't finished a ${selected.artist_name} match${period === 'week' ? ' this week' : ''}`}
+                      : `You haven't finished a ${selected.artist_name} match${period === 'week' ? ' in the last 7 days' : ''}`}
                   </Text>
                   <Text style={styles.mutedText}>
-                    {selected.matches} {selected.matches === 1 ? 'match' : 'matches'} played by everyone
+                    {selected.matches} {selected.matches === 1 ? 'match' : 'matches'} played by everyone, all time
                   </Text>
                 </View>
               </View>
@@ -347,7 +347,7 @@ function rowsBeforeGap(rows: LeaderboardRow[]): number {
 }
 
 function emptyText(scope: Scope, period: Period, artist?: string) {
-  const when = period === 'week' ? ' this week' : '';
+  const when = period === 'week' ? ' in the last 7 days' : '';
   if (scope === 'friends') {
     return artist
       ? `None of your friends has finished a ${artist} match${when}. Challenge one from the Friends tab.`

@@ -1,4 +1,5 @@
--- Leaderboard: artist-by-artist boards (Friends / Global, This week / All time)
+-- Leaderboard: artist-by-artist boards (Friends / Global, Last 7 days / All time)
+-- p_period 'week' = the last 7 days (rolling, so it never empties on Mondays).
 -- plus server-side answer timing so global scores can't be faked.
 --
 -- Run after schema.sql, friends.sql, invites.sql and security.sql.
@@ -123,7 +124,7 @@ as $$
     join rooms r on r.id = mr.room_id and r.status = 'completed'
     join track_pools tp on tp.id = r.track_pool_id
     where auth.uid() is not null
-      and (coalesce(p_period, 'all') <> 'week' or r.created_at >= date_trunc('week', now()))
+      and (coalesce(p_period, 'all') <> 'week' or r.created_at >= now() - interval '7 days')
   ),
   a as (
     select m.k,
@@ -184,7 +185,7 @@ as $$
     join track_pools tp on tp.id = r.track_pool_id
     where auth.uid() is not null
       and (p_artist is null or public.lb_artist_key(tp.artist_name) = p_artist)
-      and (coalesce(p_period, 'all') <> 'week' or r.created_at >= date_trunc('week', now()))
+      and (coalesce(p_period, 'all') <> 'week' or r.created_at >= now() - interval '7 days')
   ),
   eligible as (
     select p.id, p.username, p.display_name, p.avatar_url,

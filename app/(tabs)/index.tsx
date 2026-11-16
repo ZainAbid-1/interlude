@@ -13,8 +13,10 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
+  useWindowDimensions,
 } from 'react-native';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { WORDMARK_TEXT, wordmarkFontSize } from '../../constants/wordmark';
 import { PlayerAvatar } from '../../components/PlayerAvatar';
 import { listFriends, Friend } from '../../services/friends';
 import { useInviteStore } from '../../store/inviteStore';
@@ -44,15 +46,28 @@ import { useRoomStore } from '../../store/roomStore';
 import { Colors, Spacing, BorderRadius } from '../../constants/theme';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
-// Scale the wordmark so "INTERLUDE." always fits in full on small screens.
-const LOGO_FONT_SIZE = Math.min(48, SCREEN_WIDTH * 0.13);
-const LOGO_TEXT_HEIGHT = Math.min(52, SCREEN_WIDTH * 0.14);
+
+// The wordmark shares its row with the profile pill (140 max + 8 margin).
+// If the full pill would squeeze the logo under 40px, the pill shows only
+// the avatar (10 + 22 + 10 + border + 8 margin) and the logo gets the room.
+const LOGO_MAX = 48;
+const LOGO_SPACING = 2;
+const PILL_FULL = 148;
+const PILL_COMPACT = 52;
+function logoLayout(windowWidth: number) {
+  const inner = windowWidth - Spacing.containerPadding * 2;
+  const withFull = wordmarkFontSize(inner - PILL_FULL, LOGO_SPACING, LOGO_MAX);
+  if (withFull >= 40) return { size: withFull, compactPill: false };
+  return { size: wordmarkFontSize(inner - PILL_COMPACT, LOGO_SPACING, LOGO_MAX), compactPill: true };
+}
 
 const WARM_GOLD = '#ffffff';
 const WARM_GOLD_BRIGHT = '#e6e6e6';
 
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
+  const { width: windowWidth } = useWindowDimensions();
+  const logo = logoLayout(windowWidth);
   const [joinCode, setJoinCode] = useState('');
   const [showJoinInput, setShowJoinInput] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
@@ -277,10 +292,16 @@ export default function HomeScreen() {
           style={styles.header}
         >
           <View style={styles.logoRow}>
-            <Text style={styles.logoText} numberOfLines={1}>
-              INTERLUDE.
+            <Text
+              style={[styles.logoText, { fontSize: logo.size, lineHeight: Math.round(logo.size * 1.1) }]}
+              numberOfLines={1}
+              allowFontScaling={false}
+              adjustsFontSizeToFit
+              minimumFontScale={0.6}
+            >
+              {WORDMARK_TEXT}
             </Text>
-            <AuthPill />
+            <AuthPill compact={logo.compactPill} />
           </View>
           <Text style={styles.subtitle}>
             Choose an artist. Challenge your friend. Guess the track.
@@ -762,7 +783,7 @@ function ArtistAvatar({
 }
 
 // ─── Google sign-in pill ─────────────────────────────────────────────
-function AuthPill() {
+function AuthPill({ compact = false }: { compact?: boolean }) {
   const session = useAuthStore((s) => s.session);
   const profile = useAuthStore((s) => s.profile);
   const loading = useAuthStore((s) => s.loading);
@@ -802,9 +823,11 @@ function AuthPill() {
             <Ionicons name="person" size={16} color={WARM_GOLD} />
           </View>
         )}
-        <Text style={styles.authName} numberOfLines={1} ellipsizeMode="tail">
-          {profile.display_name ?? 'You'}
-        </Text>
+        {compact ? null : (
+          <Text style={styles.authName} numberOfLines={1} ellipsizeMode="tail">
+            {profile.display_name ?? 'You'}
+          </Text>
+        )}
       </Pressable>
     );
   }
@@ -873,11 +896,9 @@ const styles = StyleSheet.create({
   },
   logoText: {
     fontFamily: 'Antonio',
-    fontSize: LOGO_FONT_SIZE,
     color: '#ffffff',
-    letterSpacing: 2,
+    letterSpacing: LOGO_SPACING,
     textTransform: 'uppercase',
-    lineHeight: LOGO_TEXT_HEIGHT,
     textShadowColor: 'rgba(0, 0, 0, 0.95)',
     textShadowOffset: { width: 0, height: 2 },
     textShadowRadius: 8,
