@@ -9,6 +9,10 @@
         "start"
       ],
       "port": 3000
+    },
+    {
+      "name": "metro-web",
+      "url": "http://localhost:8081"
     }
   ]
 }
