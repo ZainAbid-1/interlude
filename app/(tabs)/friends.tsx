@@ -11,6 +11,7 @@ import {
   Alert,
   KeyboardAvoidingView,
   Platform,
+  useWindowDimensions,
 } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
 import Animated, { FadeInDown } from 'react-native-reanimated';
@@ -33,8 +34,19 @@ import {
   sendFriendRequest,
 } from '../../services/friends';
 
+// Measured in Inter-Bold 14: "Head to head" + icon + padding needs ~136px at
+// normal text size; Play fills the rest but should stay at least 96px wide.
+// Both must fit inside screen padding (24 x 2) and card padding (24 x 2).
+const ACTION_BUTTON_MIN = 136;
+const PLAY_MIN = 96;
+const ACTION_GAP = 8;
+
 export default function FriendsScreen() {
   const insets = useSafeAreaInsets();
+  const { width: windowWidth, fontScale } = useWindowDimensions();
+  const actionRowWidth = windowWidth - Spacing.containerPadding * 2 - 24 * 2;
+  const stackActions =
+    actionRowWidth < ACTION_BUTTON_MIN * Math.min(Math.max(fontScale, 1), 1.3) + ACTION_GAP + PLAY_MIN;
   const profile = useAuthStore((s) => s.profile);
   const me = profile?.id;
 
@@ -306,30 +318,51 @@ export default function FriendsScreen() {
                   {accepted.map((f, i) => (
                     <View key={f.id} style={[styles.friendCard, i > 0 && styles.friendCardDivider]}>
                       {/* Name gets the full width; tapping it also opens head-to-head. */}
-                      <Pressable onPress={() => router.push(`/friend/${f.id}`)}>
-                        <View style={styles.friendTop}>
-                          <PlayerAvatar
-                            uri={f.avatar_url}
-                            name={f.display_name || f.username}
-                            size={48}
-                          />
-                          <View style={styles.rowText}>
-                            <Text style={styles.friendName} numberOfLines={2}>
-                              {nameOf(f)}
-                            </Text>
-                            <Text style={styles.rowSub} numberOfLines={1}>
-                              @{f.username}
-                            </Text>
-                            <Text style={styles.friendRecord} numberOfLines={1}>
-                              {recordText(f)}
-                            </Text>
+                      {/* Name row: tapping it opens head-to-head; "..." sits here so
+                          the action row below has its full width for labels. */}
+                      <View style={styles.friendTop}>
+                        <Pressable
+                          onPress={() => router.push(`/friend/${f.id}`)}
+                          style={styles.flex1}
+                          accessibilityRole="button"
+                          accessibilityLabel={`Head to head with ${nameOf(f)}`}
+                        >
+                          <View style={styles.friendTopInner}>
+                            <PlayerAvatar
+                              uri={f.avatar_url}
+                              name={f.display_name || f.username}
+                              size={48}
+                            />
+                            <View style={styles.rowText}>
+                              <Text style={styles.friendName} numberOfLines={2}>
+                                {nameOf(f)}
+                              </Text>
+                              <Text style={styles.rowSub} numberOfLines={1}>
+                                @{f.username}
+                              </Text>
+                              <Text style={styles.friendRecord} numberOfLines={1}>
+                                {recordText(f)}
+                              </Text>
+                            </View>
                           </View>
-                        </View>
-                      </Pressable>
+                        </Pressable>
+                        <Pressable
+                          onPress={() => confirmRemove(f)}
+                          disabled={busy.has(f.id)}
+                          hitSlop={8}
+                          accessibilityLabel={`More options for ${nameOf(f)}`}
+                        >
+                          <View style={styles.moreButton}>
+                            <Ionicons name="ellipsis-horizontal" size={18} color={Colors.textSubtle} />
+                          </View>
+                        </Pressable>
+                      </View>
 
-                      {/* Every action is a labelled button, nothing hidden. */}
-                      <View style={styles.friendActions}>
-                        <View style={styles.flex1}>
+                      {/* Every action is a labelled button, nothing hidden. On
+                          narrow screens / large text they stack instead of cutting
+                          "Head to head" short. */}
+                      <View style={[styles.friendActions, stackActions && styles.friendActionsStacked]}>
+                        <View style={stackActions ? undefined : styles.flex1}>
                           <WideButton
                             label="Play"
                             icon="play"
@@ -342,23 +375,13 @@ export default function FriendsScreen() {
                             }
                           />
                         </View>
-                        <View style={styles.flex1}>
+                        <View style={stackActions ? undefined : styles.noShrink}>
                           <WideButton
                             label="Head to head"
                             icon="stats-chart"
                             onPress={() => router.push(`/friend/${f.id}`)}
                           />
                         </View>
-                        <Pressable
-                          onPress={() => confirmRemove(f)}
-                          disabled={busy.has(f.id)}
-                          hitSlop={6}
-                          accessibilityLabel={`More options for ${nameOf(f)}`}
-                        >
-                          <View style={styles.moreButton}>
-                            <Ionicons name="ellipsis-horizontal" size={18} color={Colors.textSubtle} />
-                          </View>
-                        </Pressable>
                       </View>
                     </View>
                   ))}
@@ -520,7 +543,13 @@ function WideButton({
         ]}
       >
         <Ionicons name={icon} size={15} color={color} />
-        <Text style={[styles.wideButtonText, { color }]} numberOfLines={1}>
+        <Text
+          style={[styles.wideButtonText, { color }]}
+          numberOfLines={1}
+          adjustsFontSizeToFit
+          minimumFontScale={0.8}
+          maxFontSizeMultiplier={1.3}
+        >
           {label}
         </Text>
       </View>
@@ -683,8 +712,20 @@ const styles = StyleSheet.create({
   },
   friendTop: {
     flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: Spacing.sm,
+  },
+  friendTopInner: {
+    flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.md,
+  },
+  noShrink: {
+    flexShrink: 0,
+  },
+  friendActionsStacked: {
+    flexDirection: 'column',
+    alignItems: 'stretch',
   },
   friendName: {
     fontFamily: 'Inter-Bold',
@@ -711,7 +752,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
-    height: 40,
+    height: 44,
     paddingHorizontal: 12,
     borderRadius: BorderRadius.full,
   },

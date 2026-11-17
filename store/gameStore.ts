@@ -71,6 +71,9 @@ interface GameState {
   opponentScore: number;
   playerCorrectCount: number;
   opponentCorrectCount: number;
+  /** Elo rating after this match and the change it caused (from finalize_match). */
+  myRating: number | null;
+  myRatingChange: number | null;
 
   // Round history
   roundResults: RoundResult[];
@@ -605,6 +608,8 @@ export const useGameStore = create<GameState>((set, get) => ({
   opponentScore: 0,
   playerCorrectCount: 0,
   opponentCorrectCount: 0,
+  myRating: null,
+  myRatingChange: null,
   roundResults: [],
   gameOver: false,
   loading: false,
@@ -699,6 +704,8 @@ export const useGameStore = create<GameState>((set, get) => ({
       opponentScore: 0,
       playerCorrectCount: 0,
       opponentCorrectCount: 0,
+      myRating: null,
+      myRatingChange: null,
       roundResults: [],
       myAnswered: false,
       opponentAnswered: false,
@@ -817,6 +824,8 @@ export const useGameStore = create<GameState>((set, get) => ({
       opponentScore: 0,
       playerCorrectCount: 0,
       opponentCorrectCount: 0,
+      myRating: null,
+      myRatingChange: null,
       roundResults: [],
       gameOver: false,
       loading: false,
@@ -1497,15 +1506,21 @@ async function finalizeMatch() {
       total_score: number;
       correct_count: number;
       outcome: string | null;
+      /** Present once supabase/elo.sql has been run. */
+      rating?: number | null;
+      rating_change?: number | null;
     }>;
     // The results screen keeps the scores this phone showed during the match.
     // The server's totals can briefly lag (the other phone's last answer may
     // still be on its way), which made scores jump right after the match.
     // finalize_match still records the match; whichever phone calls it last
     // saves the complete totals for the leaderboard.
+    const mine = rows.find((r) => r.player_id === state.playerId);
     const theirs = rows.find((r) => r.player_id !== state.playerId);
     useGameStore.setState({
       opponentId: theirs?.player_id ?? state.opponentId,
+      myRating: mine?.rating ?? null,
+      myRatingChange: mine?.rating_change ?? null,
       gameOver: true,
     });
     return;

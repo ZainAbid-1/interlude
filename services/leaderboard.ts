@@ -25,7 +25,7 @@ export interface LeaderboardRow {
   username: string | null;
   display_name: string | null;
   avatar_url: string | null;
-  /** Best single-match score (artist board) for this player. */
+  /** Artist board: best single-match score. All artists: Elo rating. */
   score: number;
   correct: number;
   avg_ms: number | null;
@@ -35,6 +35,10 @@ export interface LeaderboardRow {
   is_friend: boolean;
   /** Players on this board in total. */
   total: number;
+  /** All artists only: rating gained in the last 7 days (null on artist boards). */
+  rating_change?: number | null;
+  /** All artists only: fewer than 5 rated matches, so the rating is still settling. */
+  provisional?: boolean;
 }
 
 /** Artists for the picker; pass a query to search any played artist. */

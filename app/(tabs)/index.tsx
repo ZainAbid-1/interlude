@@ -61,6 +61,9 @@ function logoLayout(windowWidth: number) {
   return { size: wordmarkFontSize(inner - PILL_COMPACT, LOGO_SPACING, LOGO_MAX), compactPill: true };
 }
 
+/** Friends shown before "Show all" in the invite list. */
+const FRIENDS_PREVIEW = 4;
+
 const WARM_GOLD = '#ffffff';
 const WARM_GOLD_BRIGHT = '#e6e6e6';
 
@@ -203,6 +206,7 @@ export default function HomeScreen() {
   const [pendingChallenge, setPendingChallenge] = useState<{ id: string; name: string } | null>(null);
   const [friendsToInvite, setFriendsToInvite] = useState<Friend[]>([]);
   const [invitingId, setInvitingId] = useState<string | null>(null);
+  const [showAllFriends, setShowAllFriends] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
@@ -324,7 +328,7 @@ export default function HomeScreen() {
                   <View style={styles.actionTextContainer}>
                     <Text style={styles.actionTitle}>Create a Room</Text>
                     <Text style={styles.actionDesc}>
-                      Host a room and share the invite link
+                      Pick an artist, then challenge a friend
                     </Text>
                   </View>
                 </View>
@@ -341,258 +345,254 @@ export default function HomeScreen() {
         {/* Create Room Content (expandable) */}
         {showCreate && (
           <Animated.View entering={FadeInDown.duration(300)}>
-            <GlassCard borderRadius={24}>
-              {/* Choose artist */}
-              <Text style={styles.chooseLabel}>Choose your artist</Text>
-              <Text style={styles.chooseHint}>
-                Search to pick the artist for your room
-              </Text>
-
-              {searchActive ? (
-                <>
-                  <View style={styles.searchRow}>
-                    <Ionicons
-                      name="search"
-                      size={18}
-                      color={Colors.textSubtle}
-                    />
-                    <TextInput
-                      style={styles.searchInput}
-                      value={artistQuery}
-                      onChangeText={setArtistQuery}
-                      placeholder="Search an artist..."
-                      placeholderTextColor={Colors.textSubtle}
-                      autoCapitalize="words"
-                      autoCorrect={false}
-                      returnKeyType="search"
-                    />
-                  </View>
-
-                  {artistQuery.trim().length > 0 &&
-                    (artistMatches.length > 0 ? (
-                      <View style={styles.resultList}>
-                        {artistMatches.map((artist) => (
-                          <Pressable
-                            key={artist.id}
-                            onPress={() => selectArtist(artist)}
-                            style={[
-                              styles.resultRow,
-                              chosenArtist?.id === artist.id &&
-                                styles.resultRowActive,
-                            ]}
-                          >
-                            <ArtistAvatar
-                              uri={artist.thumb || artist.image}
-                              style={styles.resultImage}
-                              iconSize={18}
-                            />
-                            <Text style={styles.resultName} numberOfLines={1}>
-                              {artist.name}
-                            </Text>
-                            <Ionicons
-                              name={
-                                chosenArtist?.id === artist.id
-                                  ? 'checkmark-circle'
-                                  : 'chevron-forward'
-                              }
-                              size={18}
-                              color={
-                                chosenArtist?.id === artist.id
-                                  ? WARM_GOLD
-                                  : Colors.textSubtle
-                              }
-                            />
-                          </Pressable>
-                        ))}
-                      </View>
-                    ) : (
-                      <Text style={styles.searchStatus}>
-                        {searching ? 'Searching...' : 'No artists found'}
-                      </Text>
-                    ))}
-                </>
-              ) : chosenArtist ? (
-                <View style={styles.chosenRow}>
-                  <ArtistAvatar
-                    uri={chosenArtist.image || chosenArtist.thumb}
-                    style={styles.chosenImage}
-                    iconSize={24}
-                  />
-                  <View style={styles.chosenText}>
-                    <Text style={styles.chosenLabel}>Playing with</Text>
-                    <Text style={styles.chosenName} numberOfLines={2}>
-                      {chosenArtist.name}
-                    </Text>
-                  </View>
-                  <Pressable
-                    onPress={() => setSearchActive(true)}
-                    hitSlop={8}
-                    style={styles.changeButton}
-                  >
-                    <Ionicons
-                      name="create-outline"
-                      size={14}
-                      color={WARM_GOLD}
-                    />
-                    <Text style={styles.changeButtonText}>Change</Text>
-                  </Pressable>
-                </View>
-              ) : (
-                <Pressable
-                  onPress={() => setSearchActive(true)}
-                  style={styles.noArtistRow}
-                >
-                  <View style={styles.noArtistIcon}>
-                    <MaterialCommunityIcons name="music-note-plus" size={22} color={WARM_GOLD} />
-                  </View>
-                  <View style={styles.chosenText}>
-                    <Text style={styles.chosenLabel}>No artist selected</Text>
-                    <Text style={styles.noArtistHint}>Tap to search and pick an artist</Text>
-                  </View>
-                  <Ionicons name="chevron-forward" size={18} color={WARM_GOLD} />
-                </Pressable>
-              )}
-
-              <View style={styles.divider} />
-
-              {/* Challenge a friend: one tap, no code */}
+            <GlassCard borderRadius={24} padding={20}>
+              {/* Came from a friend's "Play" button */}
               {pendingChallenge ? (
                 <View style={styles.challengeBanner}>
                   <Ionicons name="flash" size={16} color="#000000" />
                   <Text style={styles.challengeBannerText} numberOfLines={2}>
                     Challenging {pendingChallenge.name}. Pick an artist to send it.
                   </Text>
-                  <Pressable onPress={() => setPendingChallenge(null)} hitSlop={8}>
-                    <Ionicons name="close" size={16} color="#000000" />
+                  <Pressable onPress={() => setPendingChallenge(null)} hitSlop={10} accessibilityLabel="Cancel challenge">
+                    <Ionicons name="close" size={18} color="#000000" />
                   </Pressable>
                 </View>
               ) : null}
 
-              {friendsToInvite.length > 0 ? (
-                <>
-                  <View style={styles.inviteHeaderRow}>
-                    <View style={styles.inviteIconRing}>
-                      <Ionicons name="flash-outline" size={18} color={WARM_GOLD} />
-                    </View>
-                    <View style={styles.inviteHeaderText}>
-                      <Text style={styles.inviteLabel}>Challenge a friend</Text>
-                      <Text style={styles.inviteHint}>
-                        {roomCode ? 'They get a pop-up and join with one tap' : 'Pick an artist first'}
+              {/* ── Step 1: artist ───────────────────────────── */}
+              <StepHeader
+                n={1}
+                title="Pick an artist"
+                done={!!chosenArtist && !searchActive}
+              />
+
+              {searchActive || !chosenArtist ? (
+                <View style={styles.stepBody}>
+                  <View style={styles.searchRow}>
+                    <Ionicons name="search" size={18} color={Colors.textSubtle} />
+                    <TextInput
+                      style={styles.searchInput}
+                      value={artistQuery}
+                      onChangeText={setArtistQuery}
+                      placeholder="Search any artist"
+                      placeholderTextColor={Colors.textSubtle}
+                      autoCapitalize="words"
+                      autoCorrect={false}
+                      returnKeyType="search"
+                    />
+                    {artistQuery.length > 0 ? (
+                      <Pressable onPress={() => setArtistQuery('')} hitSlop={10} accessibilityLabel="Clear search">
+                        <Ionicons name="close-circle" size={18} color={Colors.textSubtle} />
+                      </Pressable>
+                    ) : null}
+                  </View>
+
+                  {artistQuery.trim().length > 0 ? (
+                    artistMatches.length > 0 ? (
+                      <View style={styles.resultList}>
+                        {artistMatches.map((artist) => {
+                          const active = chosenArtist?.id === artist.id;
+                          return (
+                            <Pressable key={artist.id} onPress={() => selectArtist(artist)}>
+                              <View style={[styles.resultRow, active && styles.resultRowActive]}>
+                                <ArtistAvatar
+                                  uri={artist.thumb || artist.image}
+                                  style={styles.resultImage}
+                                  iconSize={18}
+                                />
+                                <Text style={styles.resultName} numberOfLines={2}>
+                                  {artist.name}
+                                </Text>
+                                <Ionicons
+                                  name={active ? 'checkmark-circle' : 'chevron-forward'}
+                                  size={18}
+                                  color={active ? WARM_GOLD : Colors.textSubtle}
+                                />
+                              </View>
+                            </Pressable>
+                          );
+                        })}
+                      </View>
+                    ) : (
+                      <Text style={styles.searchStatus}>
+                        {searching ? 'Searching...' : 'No artists found. Try another spelling.'}
                       </Text>
+                    )
+                  ) : (
+                    <Text style={styles.searchStatus}>
+                      The match uses 10 songs by the artist you pick.
+                    </Text>
+                  )}
+
+                  {chosenArtist ? (
+                    <Pressable onPress={() => setSearchActive(false)} hitSlop={6}>
+                      <Text style={styles.linkButton}>Keep {chosenArtist.name}</Text>
+                    </Pressable>
+                  ) : null}
+                </View>
+              ) : (
+                <View style={[styles.stepBody, styles.artistCard]}>
+                  <View style={styles.artistCardTop}>
+                    <ArtistAvatar
+                      uri={chosenArtist.image || chosenArtist.thumb}
+                      style={styles.artistCardImage}
+                      iconSize={28}
+                    />
+                    <View style={styles.artistCardText}>
+                      <Text style={styles.artistCardLabel}>Playing with</Text>
+                      <Text style={styles.artistCardName} numberOfLines={3}>
+                        {chosenArtist.name}
+                      </Text>
+                      <View style={styles.artistStatus}>
+                        {creatingRoom ? (
+                          <>
+                            <ActivityIndicator size="small" color={WARM_GOLD_BRIGHT} />
+                            <Text style={styles.artistStatusText}>Building your 10-song list...</Text>
+                          </>
+                        ) : roomCode ? (
+                          <>
+                            <Ionicons name="checkmark-circle" size={14} color={Colors.correct} />
+                            <Text style={styles.artistStatusText}>Ready. Invite your opponent below.</Text>
+                          </>
+                        ) : null}
+                      </View>
                     </View>
                   </View>
-                  <ScrollView
-                    horizontal
-                    showsHorizontalScrollIndicator={false}
-                    contentContainerStyle={styles.friendChips}
-                    style={styles.friendChipsScroll}
+                  <Pressable
+                    onPress={() => setSearchActive(true)}
+                    accessibilityRole="button"
+                    accessibilityLabel="Change artist"
                   >
-                    {friendsToInvite.map((f) => {
-                      const name = f.display_name?.split(' ')[0] || f.username;
-                      const disabled = !roomCode || creatingRoom || invitingId !== null;
-                      return (
-                        <Pressable
-                          key={f.id}
-                          disabled={disabled}
-                          onPress={() => challengeFriend({ id: f.id, name: f.display_name || `@${f.username}` })}
-                        >
-                          <View style={[styles.friendChip, disabled && styles.friendChipDisabled]}>
-                            <PlayerAvatar uri={f.avatar_url} name={name} size={48} />
-                            <Text style={styles.friendChipName} numberOfLines={1}>
-                              {name}
-                            </Text>
-                            <View style={styles.friendChipPill}>
-                              {invitingId === f.id ? (
-                                <ActivityIndicator size="small" color="#000000" />
-                              ) : (
-                                <>
-                                  <Ionicons name="play" size={11} color="#000000" />
-                                  <Text style={styles.friendChipPillText}>Play</Text>
-                                </>
-                              )}
+                    <View style={styles.changeArtist}>
+                      <Ionicons name="swap-horizontal" size={15} color="#ffffff" />
+                      <Text style={styles.changeArtistText}>Change artist</Text>
+                    </View>
+                  </Pressable>
+                </View>
+              )}
+
+              {/* ── Step 2: invite ───────────────────────────── */}
+              <StepHeader
+                n={2}
+                title="Invite your opponent"
+                hint={roomCode ? undefined : 'Pick an artist first'}
+              />
+              <View style={[styles.stepBody, !roomCode && styles.stepLocked]} pointerEvents={roomCode ? 'auto' : 'none'}>
+                {friendsToInvite.length > 0 ? (
+                  <>
+                    <Text style={styles.subLabel}>Challenge a friend</Text>
+                    <Text style={styles.subHint}>They get a pop-up and join with one tap.</Text>
+                    <View style={styles.friendList}>
+                      {(showAllFriends ? friendsToInvite : friendsToInvite.slice(0, FRIENDS_PREVIEW)).map((f, i) => {
+                        const fullName = f.display_name || `@${f.username}`;
+                        const busy = invitingId === f.id;
+                        const disabled = !roomCode || creatingRoom || invitingId !== null;
+                        return (
+                          <View key={f.id} style={[styles.friendRow, i > 0 && styles.friendRowDivider]}>
+                            <PlayerAvatar uri={f.avatar_url} name={fullName} size={42} />
+                            <View style={styles.friendText}>
+                              <Text style={styles.friendName} numberOfLines={1}>
+                                {fullName}
+                              </Text>
+                              <Text style={styles.friendSub} numberOfLines={1}>
+                                @{f.username}
+                                {f.wins + f.losses + f.draws > 0 ? `  ·  ${f.wins}-${f.losses}${f.draws ? `-${f.draws}` : ''}` : ''}
+                              </Text>
                             </View>
+                            <Pressable
+                              disabled={disabled}
+                              onPress={() => challengeFriend({ id: f.id, name: fullName })}
+                              accessibilityRole="button"
+                              accessibilityLabel={`Challenge ${fullName}`}
+                            >
+                              <View style={[styles.challengeButton, disabled && !busy && styles.challengeButtonMuted]}>
+                                {busy ? (
+                                  <ActivityIndicator size="small" color="#000000" />
+                                ) : (
+                                  <>
+                                    <Ionicons name="flash" size={13} color="#000000" />
+                                    <Text style={styles.challengeButtonText}>Challenge</Text>
+                                  </>
+                                )}
+                              </View>
+                            </Pressable>
                           </View>
-                        </Pressable>
-                      );
-                    })}
-                  </ScrollView>
-                  <View style={styles.divider} />
-                </>
-              ) : null}
-
-              {/* Invite */}
-              <View style={styles.inviteHeaderRow}>
-                <View style={styles.inviteIconRing}>
-                  <Ionicons name="key-outline" size={18} color={WARM_GOLD} />
-                </View>
-                <View style={styles.inviteHeaderText}>
-                  <Text style={styles.inviteLabel}>Room code</Text>
-                  <Text style={styles.inviteHint}>
-                    Or share the code with anyone
-                  </Text>
-                </View>
-              </View>
-
-              <View style={styles.linkRow}>
-                {creatingRoom ? (
-                  <View style={styles.linkLoading}>
-                    <ActivityIndicator size="small" color={WARM_GOLD_BRIGHT} />
-                    <Text style={styles.linkLoadingText}>
-                      Building your 10-track pool...
-                    </Text>
-                  </View>
+                        );
+                      })}
+                    </View>
+                    {friendsToInvite.length > FRIENDS_PREVIEW ? (
+                      <Pressable onPress={() => setShowAllFriends((v) => !v)} hitSlop={6}>
+                        <Text style={styles.linkButton}>
+                          {showAllFriends ? 'Show fewer' : `Show all ${friendsToInvite.length} friends`}
+                        </Text>
+                      </Pressable>
+                    ) : null}
+                  </>
                 ) : (
-                  <Text
-                    style={[styles.linkText, roomCode ? styles.codeText : null]}
-                    numberOfLines={1}
-                  >
-                    {roomCode || 'Pick an artist to get a code'}
-                  </Text>
+                  <Pressable onPress={() => router.push('/friends')}>
+                    <View style={styles.noFriends}>
+                      <Ionicons name="person-add-outline" size={18} color="#ffffff" />
+                      <Text style={styles.noFriendsText}>
+                        Add friends to challenge them with one tap
+                      </Text>
+                      <Ionicons name="chevron-forward" size={16} color={Colors.textSubtle} />
+                    </View>
+                  </Pressable>
                 )}
-                <Pressable
-                  onPress={handleCopyLink}
-                  hitSlop={8}
-                  style={styles.copyButton}
-                  disabled={creatingRoom || !roomCode}
-                >
-                  <Ionicons
-                    name={copied ? 'checkmark' : 'copy-outline'}
-                    size={18}
-                    color={copied ? WARM_GOLD : Colors.primary}
-                  />
-                </Pressable>
+
+                {/* Or share a code */}
+                <View style={styles.orRow}>
+                  <View style={styles.orLine} />
+                  <Text style={styles.orText}>or share a room code</Text>
+                  <View style={styles.orLine} />
+                </View>
+
+                <View style={styles.codeBox}>
+                  <Text
+                    style={roomCode ? styles.codeText : styles.codePlaceholder}
+                    numberOfLines={1}
+                    adjustsFontSizeToFit
+                    allowFontScaling={false}
+                  >
+                    {roomCode || '------'}
+                  </Text>
+                  <View style={styles.codeActions}>
+                    <Pressable onPress={handleCopyLink} disabled={!roomCode} accessibilityLabel="Copy room code">
+                      <View style={styles.codeAction}>
+                        <Ionicons name={copied ? 'checkmark' : 'copy-outline'} size={16} color="#ffffff" />
+                        <Text style={styles.codeActionText}>{copied ? 'Copied' : 'Copy'}</Text>
+                      </View>
+                    </Pressable>
+                    <Pressable onPress={handleShareInvite} disabled={!roomCode} accessibilityLabel="Share room code">
+                      <View style={styles.codeAction}>
+                        <Ionicons name="share-outline" size={16} color="#ffffff" />
+                        <Text style={styles.codeActionText}>Share</Text>
+                      </View>
+                    </Pressable>
+                  </View>
+                </View>
               </View>
 
-              <View style={styles.inviteButtonsRow}>
-                <Pressable
-                  onPress={handleShareInvite}
-                  disabled={creatingRoom || !roomCode}
-                  style={[
-                    styles.shareButton,
-                    (creatingRoom || !roomCode) && styles.buttonMuted,
-                  ]}
-                >
-                  <Ionicons name="share-outline" size={16} color="#ffffff" />
-                  <Text style={styles.shareButtonText}>Share Invite</Text>
-                </Pressable>
-                <Pressable
-                  onPress={startGame}
-                  style={[
-                    styles.startButton,
-                    (!chosenArtist || creatingRoom) && styles.startButtonDisabled,
-                  ]}
-                  disabled={!chosenArtist || creatingRoom}
-                >
+              {/* Main action */}
+              <Pressable
+                onPress={startGame}
+                disabled={!chosenArtist || creatingRoom}
+                accessibilityRole="button"
+              >
+                <View style={[styles.startButton, (!chosenArtist || creatingRoom) && styles.startButtonDisabled]}>
                   {creatingRoom ? (
                     <ActivityIndicator size="small" color="#000000" />
                   ) : (
                     <>
-                      <Text style={styles.startButtonText}>Start Game</Text>
-                      <Ionicons name="arrow-forward" size={16} color="#000000" />
+                      <Text style={styles.startButtonText}>Go to lobby</Text>
+                      <Ionicons name="arrow-forward" size={18} color="#000000" />
                     </>
                   )}
-                </Pressable>
-              </View>
+                </View>
+              </Pressable>
+              <Text style={styles.startHint}>
+                The match starts as soon as your opponent joins.
+              </Text>
             </GlassCard>
           </Animated.View>
         )}
@@ -613,7 +613,7 @@ export default function HomeScreen() {
                   <View style={styles.actionTextContainer}>
                     <Text style={styles.actionTitle}>Join a Room</Text>
                     <Text style={styles.actionDesc}>
-                      Enter a code from your friend
+                      Got a 6-letter code? Enter it here
                     </Text>
                   </View>
                 </View>
@@ -735,6 +735,25 @@ function FloatingDot({ config }: { config: any }) {
         dotStyle,
       ]}
     />
+  );
+}
+
+// ─── Numbered step header ────────────────────────────────────────────
+function StepHeader({ n, title, hint, done }: { n: number; title: string; hint?: string; done?: boolean }) {
+  return (
+    <View style={styles.stepHeader}>
+      <View style={[styles.stepNumber, done && styles.stepNumberDone]}>
+        {done ? (
+          <Ionicons name="checkmark" size={15} color="#000000" />
+        ) : (
+          <Text style={styles.stepNumberText}>{n}</Text>
+        )}
+      </View>
+      <View style={{ flex: 1 }}>
+        <Text style={styles.stepTitle}>{title}</Text>
+        {hint ? <Text style={styles.stepHint}>{hint}</Text> : null}
+      </View>
+    </View>
   );
 }
 
@@ -952,30 +971,40 @@ const styles = StyleSheet.create({
     color: Colors.textMuted,
   },
 
-  // Create / Invite
-  chooseLabel: {
-    fontFamily: 'Inter-Bold',
-    fontSize: 15,
-    color: Colors.primary,
+  // Create panel: steps
+  stepHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 12,
   },
-  chooseHint: {
-    fontFamily: 'Inter',
-    fontSize: 13,
-    color: Colors.textMuted,
-    marginTop: 2,
-    marginBottom: Spacing.md,
+  stepNumber: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    borderWidth: 1.5,
+    borderColor: 'rgba(255, 255, 255, 0.5)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
+  stepNumberDone: { backgroundColor: '#ffffff', borderColor: '#ffffff' },
+  stepNumberText: { fontFamily: 'Inter-Bold', fontSize: 13, color: '#ffffff' },
+  stepTitle: { fontFamily: 'Inter-Bold', fontSize: 16, color: Colors.primary },
+  stepHint: { fontFamily: 'Inter', fontSize: 12, color: Colors.textMuted, marginTop: 1 },
+  stepBody: { marginBottom: Spacing.lg },
+  stepLocked: { opacity: 0.4 },
+
+  // Step 1: search
   searchRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.sm,
-    backgroundColor: 'rgba(255, 255, 255, 0.06)',
-    borderRadius: BorderRadius.md,
+    backgroundColor: 'rgba(255, 255, 255, 0.07)',
+    borderRadius: 14,
     borderWidth: 1,
-    borderColor: Colors.glassBorder,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: 10,
-    marginBottom: Spacing.md,
+    borderColor: 'rgba(255, 255, 255, 0.16)',
+    paddingHorizontal: 14,
+    height: 48,
   },
   searchInput: {
     flex: 1,
@@ -984,213 +1013,106 @@ const styles = StyleSheet.create({
     color: Colors.primary,
     padding: 0,
   },
-  resultList: {
-    gap: Spacing.sm,
-    marginBottom: Spacing.md,
-  },
+  resultList: { marginTop: 8, gap: 2 },
   resultRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Spacing.md,
+    gap: 12,
+    minHeight: 56,
     paddingVertical: 6,
-    paddingHorizontal: Spacing.sm,
-    borderRadius: BorderRadius.md,
+    paddingHorizontal: 8,
+    borderRadius: 12,
   },
-  resultRowActive: {
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-  },
+  resultRowActive: { backgroundColor: 'rgba(255, 255, 255, 0.1)' },
   resultImage: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    backgroundColor: Colors.surfaceContainer,
-  },
-  resultImagePlaceholder: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    alignItems: 'center',
-    justifyContent: 'center',
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     backgroundColor: Colors.surfaceContainer,
   },
   resultName: {
     flex: 1,
     fontFamily: 'Inter-Bold',
     fontSize: 15,
+    lineHeight: 20,
     color: Colors.primary,
   },
   searchStatus: {
     fontFamily: 'Inter',
     fontSize: 13,
+    color: Colors.textMuted,
+    marginTop: 10,
+    textAlign: 'center',
+  },
+  linkButton: {
+    fontFamily: 'Inter-Bold',
+    fontSize: 13,
     color: Colors.textSubtle,
     textAlign: 'center',
-    marginBottom: Spacing.md,
-  },
-  chosenRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.sm,
-    backgroundColor: 'rgba(255, 255, 255, 0.08)',
-    borderRadius: BorderRadius.lg,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.2)',
-    paddingVertical: Spacing.sm,
-    paddingHorizontal: Spacing.sm,
-    marginBottom: Spacing.md,
-  },
-  chosenImage: {
-    width: 54,
-    height: 54,
-    borderRadius: 27,
-    backgroundColor: Colors.surfaceContainer,
+    textDecorationLine: 'underline',
+    marginTop: 12,
   },
   avatarFrame: {
     overflow: 'hidden',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  chosenText: {
-    flex: 1,
-    minWidth: 0,
-    paddingRight: Spacing.xs,
+
+  // Step 1: chosen artist
+  artistCard: {
+    backgroundColor: 'rgba(255, 255, 255, 0.07)',
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.16)',
+    overflow: 'hidden',
   },
-  chosenLabel: {
-    fontFamily: 'Inter',
-    fontSize: 10,
-    color: WARM_GOLD,
+  artistCardTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    padding: 14,
+  },
+  artistCardImage: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: Colors.surfaceContainer,
+  },
+  artistCardText: { flex: 1, minWidth: 0 },
+  artistCardLabel: {
+    fontFamily: 'Inter-Bold',
+    fontSize: 11,
+    color: Colors.textMuted,
     textTransform: 'uppercase',
     letterSpacing: 1.2,
-    marginBottom: 2,
   },
-  chosenName: {
+  artistCardName: {
     fontFamily: 'Inter-Bold',
-    fontSize: 16,
-    lineHeight: 21,
+    fontSize: 20,
+    lineHeight: 25,
     color: Colors.primary,
-  },
-  noArtistRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.sm,
-    backgroundColor: 'rgba(255, 255, 255, 0.06)',
-    borderRadius: BorderRadius.lg,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.18)',
-    borderStyle: 'dashed',
-    paddingVertical: Spacing.sm,
-    paddingHorizontal: Spacing.sm,
-    marginBottom: Spacing.md,
-  },
-  noArtistIcon: {
-    width: 54,
-    height: 54,
-    borderRadius: 27,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  noArtistHint: {
-    fontFamily: 'Inter',
-    fontSize: 13,
-    color: Colors.textMuted,
     marginTop: 2,
   },
-  changeButton: {
+  artistStatus: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 6 },
+  artistStatusText: { fontFamily: 'Inter', fontSize: 12, color: Colors.textSubtle, flexShrink: 1 },
+  changeArtist: {
     flexDirection: 'row',
-    alignSelf: 'center',
-    alignItems: 'center',
-    gap: 5,
-    backgroundColor: 'rgba(255, 255, 255, 0.16)',
-    borderRadius: BorderRadius.full,
-    paddingHorizontal: 14,
-    paddingVertical: 9,
-  },
-  changeButtonText: {
-    fontFamily: 'Inter-Bold',
-    fontSize: 13,
-    color: WARM_GOLD_BRIGHT,
-  },
-  divider: {
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    marginBottom: Spacing.lg,
-  },
-  inviteHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.md,
-    marginBottom: Spacing.md,
-  },
-  inviteIconRing: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.3)',
     alignItems: 'center',
     justifyContent: 'center',
+    gap: 6,
+    height: 44,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.1)',
   },
-  inviteHeaderText: {
-    flex: 1,
-  },
-  inviteLabel: {
-    fontFamily: 'Inter-Bold',
-    fontSize: 15,
-    color: Colors.primary,
-    marginBottom: 2,
-  },
-  inviteHint: {
-    fontFamily: 'Inter',
-    fontSize: 13,
-    color: Colors.textMuted,
-  },
-  linkRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.08)',
-    borderRadius: BorderRadius.md,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.2)',
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
-    marginBottom: Spacing.lg,
-  },
-  linkText: {
-    flex: 1,
-    fontFamily: 'Inter',
-    fontSize: 14,
-    color: WARM_GOLD_BRIGHT,
-    letterSpacing: 0.3,
-  },
-  codeText: {
-    fontFamily: 'Inter-Bold',
-    fontSize: 22,
-    letterSpacing: 6,
-  },
-  linkLoading: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.sm,
-  },
-  linkLoadingText: {
-    fontFamily: 'Inter',
-    fontSize: 13,
-    color: Colors.textMuted,
-    flexShrink: 1,
-  },
-  buttonMuted: {
-    opacity: 0.4,
-  },
-  copyButton: {
-    paddingLeft: Spacing.sm,
-  },
+  changeArtistText: { fontFamily: 'Inter-Bold', fontSize: 14, color: '#ffffff' },
+
+  // Step 2: friends
   challengeBanner: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.sm,
     backgroundColor: '#ffffff',
-    borderRadius: BorderRadius.md,
+    borderRadius: 12,
     paddingHorizontal: Spacing.md,
     paddingVertical: 10,
     marginBottom: Spacing.md,
@@ -1201,85 +1123,118 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#000000',
   },
-  friendChipsScroll: {
-    marginHorizontal: -Spacing.containerPadding,
-    marginBottom: Spacing.md,
-  },
-  friendChips: {
-    gap: Spacing.sm,
-    paddingHorizontal: Spacing.containerPadding,
-  },
-  friendChip: {
-    width: 84,
-    alignItems: 'center',
-    gap: 6,
-    paddingVertical: Spacing.sm,
-    borderRadius: BorderRadius.lg,
-    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+  subLabel: { fontFamily: 'Inter-Bold', fontSize: 14, color: Colors.primary },
+  subHint: { fontFamily: 'Inter', fontSize: 12, color: Colors.textMuted, marginTop: 2, marginBottom: 8 },
+  friendList: {
+    borderRadius: 16,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
     borderWidth: 1,
-    borderColor: Colors.glassBorder,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
   },
-  friendChipDisabled: {
-    opacity: 0.4,
-  },
-  friendChipName: {
-    maxWidth: 76,
-    fontFamily: 'Inter-Bold',
-    fontSize: 12,
-    color: '#ffffff',
-  },
-  friendChipPill: {
+  friendRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 3,
-    minWidth: 52,
-    height: 24,
+    gap: 12,
+    minHeight: 64,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+  },
+  friendRowDivider: { borderTopWidth: 1, borderTopColor: 'rgba(255, 255, 255, 0.07)' },
+  friendText: { flex: 1, minWidth: 0 },
+  friendName: { fontFamily: 'Inter-Bold', fontSize: 15, color: '#ffffff' },
+  friendSub: { fontFamily: 'Inter', fontSize: 12, color: Colors.textMuted, marginTop: 2 },
+  challengeButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 8,
+    gap: 4,
+    height: 36,
+    minWidth: 104,
+    paddingHorizontal: 14,
     borderRadius: BorderRadius.full,
     backgroundColor: '#ffffff',
   },
-  friendChipPillText: {
-    fontFamily: 'Inter-Bold',
-    fontSize: 11,
-    color: '#000000',
-  },
-  inviteButtonsRow: {
-    flexDirection: 'row',
-    gap: Spacing.sm,
-  },
-  shareButton: {
-    flex: 1,
+  challengeButtonMuted: { opacity: 0.45 },
+  challengeButtonText: { fontFamily: 'Inter-Bold', fontSize: 13, color: '#000000' },
+  noFriends: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: Spacing.xs,
-    backgroundColor: 'rgba(255, 255, 255, 0.18)',
-    borderRadius: BorderRadius.lg,
-    paddingVertical: 14,
+    gap: 10,
+    minHeight: 52,
+    paddingHorizontal: 14,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderColor: 'rgba(255, 255, 255, 0.25)',
   },
-  shareButtonText: {
+  noFriendsText: { flex: 1, fontFamily: 'Inter-Bold', fontSize: 13, color: '#ffffff' },
+
+  // Step 2: code
+  orRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginVertical: 16 },
+  orLine: { flex: 1, height: 1, backgroundColor: 'rgba(255, 255, 255, 0.12)' },
+  orText: { fontFamily: 'Inter', fontSize: 12, color: Colors.textMuted },
+  codeBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingLeft: 16,
+    paddingRight: 8,
+    height: 60,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255, 255, 255, 0.07)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.16)',
+  },
+  codeText: {
+    flex: 1,
     fontFamily: 'Inter-Bold',
-    fontSize: 15,
-    color: WARM_GOLD_BRIGHT,
+    fontSize: 24,
+    letterSpacing: 5,
+    color: '#ffffff',
   },
+  codePlaceholder: {
+    flex: 1,
+    fontFamily: 'Inter-Bold',
+    fontSize: 24,
+    letterSpacing: 5,
+    color: 'rgba(255, 255, 255, 0.25)',
+  },
+  codeActions: { flexDirection: 'row', gap: 6 },
+  codeAction: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: 56,
+    height: 46,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    gap: 2,
+  },
+  codeActionText: { fontFamily: 'Inter-Bold', fontSize: 10, color: '#ffffff' },
+
+  // Main action
   startButton: {
-    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: Spacing.xs,
+    gap: 8,
+    height: 54,
     backgroundColor: WARM_GOLD,
-    borderRadius: BorderRadius.lg,
-    paddingVertical: 14,
+    borderRadius: BorderRadius.full,
   },
   startButtonText: {
     fontFamily: 'Inter-Bold',
-    fontSize: 15,
+    fontSize: 16,
     color: '#000000',
   },
   startButtonDisabled: {
     opacity: 0.35,
+  },
+  startHint: {
+    fontFamily: 'Inter',
+    fontSize: 12,
+    color: Colors.textMuted,
+    textAlign: 'center',
+    marginTop: 8,
   },
 
   // Join

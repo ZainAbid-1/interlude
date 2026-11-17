@@ -32,6 +32,8 @@ interface Stats {
   wins: number;
   artists: number;
   bestArtist: string | null;
+  /** Elo rating (the All artists board score); null before the first match. */
+  rating: number | null;
 }
 
 export default function SettingsScreen() {
@@ -63,6 +65,7 @@ export default function SettingsScreen() {
       wins: me?.wins ?? 0,
       artists: mine.length,
       bestArtist: best?.artist_name ?? null,
+      rating: me ? me.score : null,
     });
 
     if (supabase) {
@@ -114,7 +117,6 @@ export default function SettingsScreen() {
   };
 
   const name = profile?.display_name || (profile?.username ? `@${profile.username}` : 'Not signed in');
-  const winRate = stats && stats.matches > 0 ? Math.round((stats.wins * 100) / stats.matches) : null;
 
   return (
     <View style={[styles.screen, { paddingTop: insets.top }]}>
@@ -167,7 +169,10 @@ export default function SettingsScreen() {
                       <View style={styles.statDivider} />
                       <Stat value={String(stats.wins)} label="Wins" />
                       <View style={styles.statDivider} />
-                      <Stat value={winRate == null ? '-' : `${winRate}%`} label="Win rate" />
+                      <Stat
+                        value={stats.rating == null ? '1,000' : stats.rating.toLocaleString('en-US')}
+                        label="Rating"
+                      />
                       <View style={styles.statDivider} />
                       <Stat value={String(stats.artists)} label="Artists" />
                     </>
@@ -245,7 +250,8 @@ export default function SettingsScreen() {
                 <HelpLine icon="musical-notes-outline" text="Each round plays a short clip. Pick the song from 4 options within 8 seconds." />
                 <HelpLine icon="checkmark-circle-outline" text="Right answer: 100 points, plus up to 100 more for speed. Answer instantly for the full bonus; it runs out at 8 seconds." />
                 <HelpLine icon="close-circle-outline" text="Wrong answer or no answer: 0 points." />
-                <HelpLine icon="podium-outline" text="Leaderboards rank your best single match per artist. All artists ranks by wins." />
+                <HelpLine icon="podium-outline" text="Artist boards rank your best single match for that artist." />
+                <HelpLine icon="trending-up-outline" text="All artists ranks by rating. Everyone starts at 1,000; beating a stronger player earns more, beating a weaker one less." />
               </View>
             ) : null}
           </GlassCard>

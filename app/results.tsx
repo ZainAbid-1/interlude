@@ -41,6 +41,8 @@ export default function ResultsScreen() {
     artistName,
     resetGame,
     opponentId,
+    myRating,
+    myRatingChange,
   } = useGameStore();
 
   const playerWins = playerScore > opponentScore;
@@ -117,6 +119,22 @@ export default function ResultsScreen() {
                 </Text>
               </View>
             </View>
+            {myRating != null ? (
+              <View style={styles.ratingRow}>
+                <Text style={styles.ratingLabel}>Rating</Text>
+                <Text style={styles.ratingValue}>{myRating.toLocaleString('en-US')}</Text>
+                {myRatingChange != null && myRatingChange !== 0 ? (
+                  <Text
+                    style={[
+                      styles.ratingChange,
+                      { color: myRatingChange > 0 ? Colors.correct : Colors.incorrect },
+                    ]}
+                  >
+                    {myRatingChange > 0 ? `+${myRatingChange}` : `${myRatingChange}`}
+                  </Text>
+                ) : null}
+              </View>
+            ) : null}
           </GlassCard>
         </Animated.View>
 
@@ -335,6 +353,19 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: Colors.textMuted,
   },
+  ratingRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    justifyContent: 'center',
+    gap: 8,
+    marginTop: Spacing.md,
+    paddingTop: Spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  ratingLabel: { fontFamily: 'Inter', fontSize: 13, color: Colors.textMuted },
+  ratingValue: { fontFamily: 'Inter-Bold', fontSize: 18, color: Colors.primary },
+  ratingChange: { fontFamily: 'Inter-Bold', fontSize: 14 },
   vsContainer: {
     width: 40,
     height: 40,

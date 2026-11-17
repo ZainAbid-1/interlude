@@ -298,11 +298,18 @@ export default function LeaderboardScreen() {
           <GlassCard borderRadius={24} padding={0}>
             <View style={styles.boardHeader}>
               <Text style={styles.cardTitle}>
-                {selected ? `Best scores · ${selected.artist_name}` : 'Most wins · All artists'}
+                {selected ? `Best scores · ${selected.artist_name}` : 'Rating · All artists'}
               </Text>
               <Text style={styles.mutedText}>
-                {selected ? 'Best single match' : 'Win rate from 5 matches'}
+                {selected
+                  ? 'Best single match'
+                  : period === 'week'
+                    ? 'Rating gained in the last 7 days'
+                    : 'Everyone starts at 1,000. Beat stronger players to climb faster.'}
               </Text>
+              {rows.some((r) => r.is_friend) ? (
+                <Text style={styles.mutedText}>Tap a friend to see your head to head.</Text>
+              ) : null}
             </View>
 
             {loading ? (
@@ -313,12 +320,12 @@ export default function LeaderboardScreen() {
               <View style={styles.emptyBlock}>
                 <Ionicons name="trophy-outline" size={32} color={Colors.textMuted} />
                 <Text style={styles.emptyText}>{emptyText(scope, period, selected?.artist_name)}</Text>
-                {rows.length > 0 ? <Row row={rows[0]} perArtist={!!selected} /> : null}
+                {rows.length > 0 ? <Row row={rows[0]} perArtist={!!selected} week={period === 'week'} /> : null}
               </View>
             ) : (
               <View>
                 {others.map((r) => (
-                  <Row key={r.player_id} row={r} perArtist={!!selected} />
+                  <Row key={r.player_id} row={r} perArtist={!!selected} week={period === 'week'} />
                 ))}
                 {pinnedMe ? (
                   <>
@@ -327,7 +334,7 @@ export default function LeaderboardScreen() {
                       <Text style={styles.mutedText}>Your spot</Text>
                       <View style={styles.gapLine} />
                     </View>
-                    <Row row={pinnedMe} perArtist={!!selected} />
+                    <Row row={pinnedMe} perArtist={!!selected} week={period === 'week'} />
                   </>
                 ) : null}
               </View>
@@ -356,44 +363,69 @@ function emptyText(scope: Scope, period: Period, artist?: string) {
   return artist ? `No finished ${artist} matches${when} yet.` : `No finished matches${when} yet.`;
 }
 
-function Row({ row, perArtist }: { row: LeaderboardRow; perArtist: boolean }) {
+function Row({ row, perArtist, week }: { row: LeaderboardRow; perArtist: boolean; week: boolean }) {
   const podium = row.rank <= 3;
-  const winRate = row.matches >= 5 ? `${Math.round((row.wins * 100) / row.matches)}%` : null;
+  const change = row.rating_change ?? 0;
   const content = (
     <View style={[styles.row, row.is_me && styles.rowMe]}>
       <View style={[styles.rank, podium && styles.rankPodium]}>
         <Text style={[styles.rankText, podium && styles.rankTextPodium]}>{row.rank}</Text>
       </View>
-      <PlayerAvatar uri={row.avatar_url} name={row.display_name || row.username} size={40} />
-      <View style={{ flex: 1 }}>
-        <Text style={styles.rowName} numberOfLines={1}>
+      <PlayerAvatar uri={row.avatar_url} name={row.display_name || row.username} size={36} />
+      {/* Name gets most of the row; secondary stats live under it. */}
+      <View style={styles.rowMain}>
+        <Text style={styles.rowName} numberOfLines={2}>
           {nameOf(row)}
           {row.is_me ? '  (you)' : ''}
         </Text>
-        <Text style={styles.mutedText} numberOfLines={1}>
-          {row.username ? `@${row.username}` : ''}
-          {row.is_friend ? '  ·  Head to head' : ''}
-        </Text>
+        {row.username ? (
+          <Text style={styles.mutedText} numberOfLines={1}>
+            @{row.username}
+          </Text>
+        ) : null}
+        <View style={styles.rowStats}>
+          {!perArtist && row.provisional ? (
+            <View style={styles.newTag}>
+              <Text style={styles.newTagText}>New</Text>
+            </View>
+          ) : null}
+          <Text style={styles.rowStatsText} numberOfLines={1}>
+            {perArtist
+              ? `${row.correct} right · ${secs(row.avg_ms)} avg`
+              : `${week ? `Rating ${fmt(row.score)} · ` : ''}${row.wins} ${row.wins === 1 ? 'win' : 'wins'} · ${row.matches} played`}
+          </Text>
+        </View>
       </View>
+
+      {/* One number, always labelled. */}
       <View style={styles.rowRight}>
         {perArtist ? (
           <>
             <Text style={styles.rowScore}>{fmt(row.score)}</Text>
-            <Text style={styles.mutedText}>
-              {row.correct} right · {secs(row.avg_ms)}
+            <Text style={styles.rowScoreLabel}>best</Text>
+          </>
+        ) : week ? (
+          <>
+            <Text
+              style={[
+                styles.rowScore,
+                { color: change > 0 ? Colors.correct : change < 0 ? Colors.incorrect : '#ffffff' },
+              ]}
+            >
+              {change > 0 ? `+${change}` : `${change}`}
             </Text>
+            <Text style={styles.rowScoreLabel}>this week</Text>
           </>
         ) : (
           <>
-            <Text style={styles.rowScore}>
-              {row.wins} {row.wins === 1 ? 'win' : 'wins'}
-            </Text>
-            <Text style={styles.mutedText}>
-              {row.matches} played{winRate ? ` · ${winRate}` : ''}
-            </Text>
+            <Text style={styles.rowScore}>{fmt(row.score)}</Text>
+            <Text style={styles.rowScoreLabel}>rating</Text>
           </>
         )}
       </View>
+      {row.is_friend ? (
+        <Ionicons name="chevron-forward" size={14} color={Colors.textMuted} />
+      ) : null}
     </View>
   );
   if (!row.is_friend) return content;
@@ -579,9 +611,9 @@ const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: 10,
     paddingVertical: 12,
-    paddingHorizontal: 16,
+    paddingHorizontal: 14,
     borderTopWidth: 1,
     borderTopColor: 'rgba(255, 255, 255, 0.06)',
   },
@@ -596,9 +628,21 @@ const styles = StyleSheet.create({
   rankPodium: { backgroundColor: '#ffffff' },
   rankText: { fontFamily: 'Inter-Bold', fontSize: 13, color: Colors.textSubtle },
   rankTextPodium: { color: '#0a0a0a' },
-  rowName: { fontFamily: 'Inter-Bold', fontSize: 14, color: '#ffffff' },
-  rowRight: { alignItems: 'flex-end' },
-  rowScore: { fontFamily: 'Inter-Bold', fontSize: 16, color: '#ffffff' },
+  rowMain: { flex: 1, minWidth: 0 },
+  rowName: { fontFamily: 'Inter-Bold', fontSize: 14, lineHeight: 18, color: '#ffffff' },
+  rowStats: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 3 },
+  rowStatsText: { flexShrink: 1, fontFamily: 'Inter', fontSize: 12, color: Colors.textSubtle },
+  rowRight: { alignItems: 'flex-end', flexShrink: 0, minWidth: 52 },
+  rowScore: { fontFamily: 'Inter-Bold', fontSize: 17, color: '#ffffff' },
+  rowScoreLabel: { fontFamily: 'Inter', fontSize: 11, color: Colors.textMuted, marginTop: 1 },
+  newTag: {
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.35)',
+  },
+  newTagText: { fontFamily: 'Inter-Bold', fontSize: 10, color: Colors.textSubtle, letterSpacing: 0.5 },
   gap: {
     flexDirection: 'row',
     alignItems: 'center',
