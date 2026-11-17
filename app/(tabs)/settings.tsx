@@ -137,11 +137,11 @@ export default function SettingsScreen() {
             <View style={styles.profileRow}>
               <PlayerAvatar uri={profile?.avatar_url} name={profile?.display_name || profile?.username} size={64} />
               <View style={styles.flex}>
-                <Text style={styles.displayName} numberOfLines={2}>
+                <Text style={styles.displayName}>
                   {name}
                 </Text>
                 {profile?.username ? (
-                  <Text style={styles.usernameText} numberOfLines={1}>
+                  <Text style={styles.usernameText}>
                     @{profile.username}
                   </Text>
                 ) : null}
@@ -181,7 +181,7 @@ export default function SettingsScreen() {
                   )}
                 </View>
                 {stats ? (
-                  <Text style={styles.statsHint} numberOfLines={2}>
+                  <Text style={styles.statsHint}>
                     {stats.bestArtist
                       ? `You know ${stats.bestArtist} best. Tap to see the leaderboard.`
                       : 'Finish a match to start your stats. Tap to see the leaderboard.'}

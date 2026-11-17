@@ -334,13 +334,13 @@ export default function FriendsScreen() {
                               size={48}
                             />
                             <View style={styles.rowText}>
-                              <Text style={styles.friendName} numberOfLines={2}>
+                              <Text style={styles.friendName}>
                                 {nameOf(f)}
                               </Text>
-                              <Text style={styles.rowSub} numberOfLines={1}>
+                              <Text style={styles.rowSub}>
                                 @{f.username}
                               </Text>
-                              <Text style={styles.friendRecord} numberOfLines={1}>
+                              <Text style={styles.friendRecord}>
                                 {recordText(f)}
                               </Text>
                             </View>
@@ -441,10 +441,10 @@ function PlayerRow({
     <View style={styles.rowInfo}>
       <PlayerAvatar uri={player.avatar_url} name={player.display_name || player.username} size={44} />
       <View style={styles.rowText}>
-        <Text style={styles.rowName} numberOfLines={1}>
+        <Text style={styles.rowName}>
           {nameOf(player)}
         </Text>
-        <Text style={styles.rowSub} numberOfLines={1}>
+        <Text style={styles.rowSub}>
           @{player.username}
           {detail ? `  ·  ${detail}` : ''}
         </Text>

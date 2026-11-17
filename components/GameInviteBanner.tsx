@@ -84,7 +84,7 @@ export function GameInviteBanner() {
           <PlayerAvatar uri={invite.from_avatar_url} name={sender} size={44} />
           <View style={styles.textCol}>
             <Text style={styles.kicker}>CHALLENGE</Text>
-            <Text style={styles.title} numberOfLines={1}>
+            <Text style={styles.title}>
               {sender} challenges you
             </Text>
             <View style={styles.artistRow}>
@@ -93,7 +93,7 @@ export function GameInviteBanner() {
               ) : (
                 <Ionicons name="musical-notes" size={14} color={Colors.textSubtle} />
               )}
-              <Text style={styles.artist} numberOfLines={1}>
+              <Text style={styles.artist}>
                 {invite.artist_name}
               </Text>
               <Text style={styles.timer}>

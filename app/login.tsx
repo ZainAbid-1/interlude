@@ -87,7 +87,7 @@ export default function LoginScreen() {
                   <Ionicons name="logo-google" size={20} color="#ffffff" />
                 </View>
               )}
-              <Text style={styles.googleButtonText} numberOfLines={1}>
+              <Text style={styles.googleButtonText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
                 {signingIn ? 'Signing in...' : 'Sign in with Google'}
               </Text>
             </View>

@@ -71,9 +71,9 @@ export function AnswerButton({
       >
         <Text
           style={[styles.label, stateStyles.text]}
-          numberOfLines={2}
+          numberOfLines={3}
           adjustsFontSizeToFit
-          minimumFontScale={0.7}
+          minimumFontScale={0.6}
         >
           {label}
         </Text>

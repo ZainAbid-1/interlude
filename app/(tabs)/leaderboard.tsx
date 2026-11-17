@@ -203,7 +203,7 @@ export default function LeaderboardScreen() {
                       <Pressable key={a.artist_key} onPress={() => pickArtist(a)}>
                         <View style={styles.searchRow}>
                           <ArtistImage uri={a.artist_image_url} name={a.artist_name} size={32} />
-                          <Text style={styles.searchRowName} numberOfLines={1}>
+                          <Text style={styles.searchRowName}>
                             {a.artist_name}
                           </Text>
                           <Text style={styles.mutedText}>
@@ -248,7 +248,7 @@ export default function LeaderboardScreen() {
               <View style={styles.youRow}>
                 <ArtistImage uri={selected.artist_image_url} name={selected.artist_name} size={52} />
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.cardTitle} numberOfLines={1}>
+                  <Text style={styles.cardTitle}>
                     {selected.artist_name}
                   </Text>
                   <Text style={styles.youSub}>
@@ -273,7 +273,7 @@ export default function LeaderboardScreen() {
                     <Pressable key={a.artist_key} onPress={() => pickArtist(a)} style={{ flex: 1 }}>
                       <View style={styles.myArtist}>
                         <ArtistImage uri={a.artist_image_url} name={a.artist_name} size={44} />
-                        <Text style={styles.myArtistName} numberOfLines={1}>
+                        <Text style={styles.myArtistName}>
                           {a.artist_name}
                         </Text>
                         <Text style={styles.myArtistScore}>{fmt(a.my_best ?? 0)}</Text>
@@ -374,26 +374,30 @@ function Row({ row, perArtist, week }: { row: LeaderboardRow; perArtist: boolean
       <PlayerAvatar uri={row.avatar_url} name={row.display_name || row.username} size={36} />
       {/* Name gets most of the row; secondary stats live under it. */}
       <View style={styles.rowMain}>
-        <Text style={styles.rowName} numberOfLines={2}>
+        <Text style={styles.rowName}>
           {nameOf(row)}
           {row.is_me ? '  (you)' : ''}
         </Text>
-        {row.username ? (
-          <Text style={styles.mutedText} numberOfLines={1}>
-            @{row.username}
-          </Text>
-        ) : null}
+        {row.username ? <Text style={styles.mutedText}>@{row.username}</Text> : null}
+        {/* Separate pieces in a wrapping row: each fact is shown whole or
+            moves to the next line, never cut with "...". */}
         <View style={styles.rowStats}>
           {!perArtist && row.provisional ? (
             <View style={styles.newTag}>
               <Text style={styles.newTagText}>New</Text>
             </View>
           ) : null}
-          <Text style={styles.rowStatsText} numberOfLines={1}>
-            {perArtist
-              ? `${row.correct} right · ${secs(row.avg_ms)} avg`
-              : `${week ? `Rating ${fmt(row.score)} · ` : ''}${row.wins} ${row.wins === 1 ? 'win' : 'wins'} · ${row.matches} played`}
-          </Text>
+          {(perArtist
+            ? [`${row.correct} right`, `${secs(row.avg_ms)} avg`]
+            : [
+                ...(week ? [`Rating ${fmt(row.score)}`] : []),
+                `${row.wins} of ${row.matches} won`,
+              ]
+          ).map((part) => (
+            <Text key={part} style={styles.rowStatsText}>
+              {part}
+            </Text>
+          ))}
         </View>
       </View>
 
@@ -486,7 +490,7 @@ function Chip({
     <Pressable onPress={onPress}>
       <View style={[styles.chip, active && styles.chipActive]}>
         {image !== undefined ? <ArtistImage uri={image} name={label} size={24} /> : null}
-        <Text style={[styles.chipText, active && styles.chipTextActive]} numberOfLines={1}>
+        <Text style={[styles.chipText, active && styles.chipTextActive]}>
           {label}
         </Text>
       </View>
@@ -549,13 +553,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    height: 38,
+    minHeight: 38,
+    paddingVertical: 6,
     paddingHorizontal: 14,
     borderRadius: BorderRadius.full,
     backgroundColor: 'rgba(20, 20, 20, 0.75)',
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.2)',
-    maxWidth: 200,
   },
   chipActive: { backgroundColor: '#ffffff', borderColor: '#ffffff' },
   chipText: { fontFamily: 'Inter-Bold', fontSize: 13, color: '#ffffff', flexShrink: 1 },
@@ -601,7 +605,7 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     backgroundColor: 'rgba(255, 255, 255, 0.06)',
   },
-  myArtistName: { fontFamily: 'Inter-Bold', fontSize: 12, color: '#ffffff', maxWidth: '100%' },
+  myArtistName: { fontFamily: 'Inter-Bold', fontSize: 12, color: '#ffffff', textAlign: 'center' },
   myArtistScore: { fontFamily: 'Inter', fontSize: 12, color: Colors.textSubtle },
   boardHeader: { paddingHorizontal: 20, paddingTop: 20, paddingBottom: 12, gap: 2 },
   mutedText: { fontFamily: 'Inter', fontSize: 12, color: Colors.textMuted },
@@ -630,8 +634,8 @@ const styles = StyleSheet.create({
   rankTextPodium: { color: '#0a0a0a' },
   rowMain: { flex: 1, minWidth: 0 },
   rowName: { fontFamily: 'Inter-Bold', fontSize: 14, lineHeight: 18, color: '#ffffff' },
-  rowStats: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 3 },
-  rowStatsText: { flexShrink: 1, fontFamily: 'Inter', fontSize: 12, color: Colors.textSubtle },
+  rowStats: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', columnGap: 8, rowGap: 2, marginTop: 3 },
+  rowStatsText: { fontFamily: 'Inter', fontSize: 12, color: Colors.textSubtle },
   rowRight: { alignItems: 'flex-end', flexShrink: 0, minWidth: 52 },
   rowScore: { fontFamily: 'Inter-Bold', fontSize: 17, color: '#ffffff' },
   rowScoreLabel: { fontFamily: 'Inter', fontSize: 11, color: Colors.textMuted, marginTop: 1 },

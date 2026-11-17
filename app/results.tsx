@@ -152,7 +152,7 @@ export default function ResultsScreen() {
                     <View style={styles.roundLeft}>
                       <Text style={styles.roundIndex}>R{result.roundIndex}</Text>
                       <View style={{ flex: 1, paddingRight: 8 }}>
-                        <Text style={styles.roundAnswer} numberOfLines={1}>
+                        <Text style={styles.roundAnswer}>
                           {result.playerAnswer || 'No answer'}
                         </Text>
                       </View>

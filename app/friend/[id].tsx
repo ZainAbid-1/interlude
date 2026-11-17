@@ -115,7 +115,7 @@ export default function FriendHeadToHead() {
                 <View style={styles.vsRow}>
                   <View style={styles.vsSide}>
                     <PlayerAvatar uri={me?.avatar_url} name={me?.display_name ?? me?.username} size={64} />
-                    <Text style={styles.vsName} numberOfLines={1}>{myName}</Text>
+                    <Text style={styles.vsName}>{myName}</Text>
                   </View>
 
                   <Animated.View entering={ZoomIn.delay(250).duration(400)} style={styles.scoreBlock}>
@@ -133,7 +133,7 @@ export default function FriendHeadToHead() {
 
                   <View style={styles.vsSide}>
                     <PlayerAvatar uri={friend?.avatar_url} name={theirName} size={64} />
-                    <Text style={styles.vsName} numberOfLines={1}>{theirName}</Text>
+                    <Text style={styles.vsName}>{theirName}</Text>
                   </View>
                 </View>
 
@@ -306,7 +306,7 @@ function Chip({
       {icon ? (
         <MaterialCommunityIcons name={icon} size={13} color={strong ? '#000000' : '#ffffff'} />
       ) : null}
-      <Text style={[styles.chipText, strong && styles.chipTextStrong]} numberOfLines={1}>
+      <Text style={[styles.chipText, strong && styles.chipTextStrong]}>
         {text}
       </Text>
     </View>
@@ -325,7 +325,7 @@ function ArtistCard({ battle, theirName }: { battle: ArtistBattle; theirName: st
           <Ionicons name="musical-notes" size={28} color={Colors.textSubtle} />
         </View>
       )}
-      <Text style={styles.artistName} numberOfLines={1}>
+      <Text style={styles.artistName}>
         {battle.artist}
       </Text>
       <Text style={styles.artistRecord}>
@@ -338,7 +338,6 @@ function ArtistCard({ battle, theirName }: { battle: ArtistBattle; theirName: st
           battle.wins > battle.losses && { color: Colors.correct },
           battle.losses > battle.wins && { color: Colors.incorrect },
         ]}
-        numberOfLines={1}
       >
         {lead}
       </Text>
@@ -360,14 +359,14 @@ function Highlight({
   return (
     <View style={styles.highlight}>
       <MaterialCommunityIcons name={icon} size={18} color={Colors.textSubtle} />
-      <Text style={styles.highlightLabel} numberOfLines={1}>
+      <Text style={styles.highlightLabel}>
         {label}
       </Text>
-      <Text style={styles.highlightValue} numberOfLines={1}>
+      <Text style={styles.highlightValue}>
         {value}
       </Text>
       {sub ? (
-        <Text style={styles.highlightSub} numberOfLines={1}>
+        <Text style={styles.highlightSub}>
           {sub}
         </Text>
       ) : null}
@@ -389,7 +388,7 @@ function MatchRow({ match }: { match: H2HMatch }) {
         </View>
       )}
       <View style={styles.matchText}>
-        <Text style={styles.matchArtist} numberOfLines={1}>
+        <Text style={styles.matchArtist}>
           {match.artist_name}
         </Text>
         <Text style={styles.matchWhen}>{timeAgo(match.played_at)}</Text>
@@ -457,6 +456,7 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#ffffff',
     maxWidth: 84,
+    textAlign: 'center',
   },
   scoreBlock: {
     flex: 1,

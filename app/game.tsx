@@ -430,12 +430,12 @@ export default function GameScreen() {
               <View style={styles.trackInfo}>
                 <View style={styles.trackInfoRow}>
                   <View style={styles.trackNameWrap}>
-                    <Text style={styles.artistNameText} numberOfLines={1}>
+                    <Text style={styles.artistNameText}>
                       {revealTrack
                         ? (currentRound.track?.track_name ?? 'Playing')
                         : 'Guess the track'}
                     </Text>
-                    <Text style={styles.artistSubText} numberOfLines={1}>
+                    <Text style={styles.artistSubText}>
                       {revealTrack ? 'Correct answer' : 'Tap to hear a clip'}
                     </Text>
                   </View>

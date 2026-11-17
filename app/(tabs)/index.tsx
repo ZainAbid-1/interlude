@@ -350,7 +350,7 @@ export default function HomeScreen() {
               {pendingChallenge ? (
                 <View style={styles.challengeBanner}>
                   <Ionicons name="flash" size={16} color="#000000" />
-                  <Text style={styles.challengeBannerText} numberOfLines={2}>
+                  <Text style={styles.challengeBannerText}>
                     Challenging {pendingChallenge.name}. Pick an artist to send it.
                   </Text>
                   <Pressable onPress={() => setPendingChallenge(null)} hitSlop={10} accessibilityLabel="Cancel challenge">
@@ -400,7 +400,7 @@ export default function HomeScreen() {
                                   style={styles.resultImage}
                                   iconSize={18}
                                 />
-                                <Text style={styles.resultName} numberOfLines={2}>
+                                <Text style={styles.resultName}>
                                   {artist.name}
                                 </Text>
                                 <Ionicons
@@ -440,7 +440,7 @@ export default function HomeScreen() {
                     />
                     <View style={styles.artistCardText}>
                       <Text style={styles.artistCardLabel}>Playing with</Text>
-                      <Text style={styles.artistCardName} numberOfLines={3}>
+                      <Text style={styles.artistCardName}>
                         {chosenArtist.name}
                       </Text>
                       <View style={styles.artistStatus}>
@@ -491,10 +491,10 @@ export default function HomeScreen() {
                           <View key={f.id} style={[styles.friendRow, i > 0 && styles.friendRowDivider]}>
                             <PlayerAvatar uri={f.avatar_url} name={fullName} size={42} />
                             <View style={styles.friendText}>
-                              <Text style={styles.friendName} numberOfLines={1}>
+                              <Text style={styles.friendName}>
                                 {fullName}
                               </Text>
-                              <Text style={styles.friendSub} numberOfLines={1}>
+                              <Text style={styles.friendSub}>
                                 @{f.username}
                                 {f.wins + f.losses + f.draws > 0 ? `  ·  ${f.wins}-${f.losses}${f.draws ? `-${f.draws}` : ''}` : ''}
                               </Text>
@@ -843,9 +843,9 @@ function AuthPill({ compact = false }: { compact?: boolean }) {
           </View>
         )}
         {compact ? null : (
-          <Text style={styles.authName} numberOfLines={1} ellipsizeMode="tail">
-            {profile.display_name ?? 'You'}
-          </Text>
+          <Text style={styles.authName} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
+          {profile.display_name?.trim().split(/\s+/)[0] || 'You'}
+        </Text>
         )}
       </Pressable>
     );
