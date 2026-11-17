@@ -37,6 +37,10 @@ export function preloadCover(url: string | null | undefined): Promise<boolean> {
  * becomes responsible for removing it) instead of creating a fresh one.
  */
 const players = new Map<string, AudioPlayer>();
+/** Never keep more than this many preloaded players waiting. */
+const MAX_PRELOADED = 4;
+/** URLs whose player the game screen is using right now. */
+const inUse = new Set<string>();
 
 export function createClipPlayer(url: string): AudioPlayer {
   const player = createAudioPlayer({ uri: url }, { downloadFirst: true, updateInterval: 100 });
@@ -44,10 +48,73 @@ export function createClipPlayer(url: string): AudioPlayer {
   return player;
 }
 
-/** Starts buffering a clip in the background. No-op if already cached. */
-export function preloadClip(url: string | null | undefined) {
-  if (!url || players.has(url)) return;
+/**
+ * Frees a player's native resources NOW.
+ *
+ * On Android, `remove()` alone only unregisters the player; the ExoPlayer
+ * (decoder + audio output) is freed when JS garbage-collects the object or
+ * when `release()` is called. Without release(), every match leaked ~10
+ * players and after a few matches new clips played silently until the app
+ * was restarted.
+ *
+ * With `downloadFirst`, expo-audio swaps in the downloaded file a moment
+ * after creation; releasing before that makes its internal `replace()` throw.
+ * So a player that hasn't loaded yet is released once it has (or after 20s).
+ */
+export function disposeClipPlayer(player: AudioPlayer) {
+  const free = () => {
+    try {
+      player.pause();
+    } catch {}
+    try {
+      player.remove();
+    } catch {}
+    try {
+      player.release();
+    } catch {}
+  };
+  let loaded = false;
   try {
+    loaded = player.isLoaded;
+  } catch {}
+  if (loaded) {
+    free();
+    return;
+  }
+  try {
+    player.pause();
+  } catch {}
+  const startedAt = Date.now();
+  const timer = setInterval(() => {
+    let ready = true;
+    try {
+      ready = player.isLoaded;
+    } catch {}
+    if (ready || Date.now() - startedAt > 20000) {
+      clearInterval(timer);
+      free();
+    }
+  }, 500);
+}
+
+/** The game screen calls these around using a clip, so it isn't preloaded twice. */
+export function markClipInUse(url: string) {
+  inUse.add(url);
+}
+export function markClipDone(url: string) {
+  inUse.delete(url);
+}
+
+/** Starts buffering a clip in the background. No-op if already cached or playing. */
+export function preloadClip(url: string | null | undefined) {
+  if (!url || players.has(url) || inUse.has(url)) return;
+  try {
+    // Oldest preloads go first if too many are waiting.
+    while (players.size >= MAX_PRELOADED) {
+      const [oldUrl, oldPlayer] = players.entries().next().value as [string, AudioPlayer];
+      players.delete(oldUrl);
+      disposeClipPlayer(oldPlayer);
+    }
     players.set(url, createClipPlayer(url));
   } catch (e) {
     console.log('[clipCache] preload failed', e);
@@ -68,11 +135,7 @@ export function clearClips(keep: Iterable<string> = []) {
   const keepSet = new Set(keep);
   for (const [url, player] of players) {
     if (keepSet.has(url)) continue;
-    try {
-      player.remove();
-    } catch {
-      // already released
-    }
     players.delete(url);
+    disposeClipPlayer(player);
   }
 }

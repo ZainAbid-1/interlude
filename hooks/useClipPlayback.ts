@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { setAudioModeAsync } from 'expo-audio';
-import { createClipPlayer, takeClip } from '../services/clipCache';
+import { setAudioModeAsync, setIsAudioActiveAsync } from 'expo-audio';
+import {
+  createClipPlayer,
+  disposeClipPlayer,
+  markClipDone,
+  markClipInUse,
+  takeClip,
+} from '../services/clipCache';
 import type { AudioPlayer, AudioStatus } from 'expo-audio';
 
 export const CLIP_DURATION_MS = 3000;
@@ -40,11 +46,18 @@ export function useClipPlayback(previewUrl: string | null, startMs: number) {
 
   // Configure audio mode once. Must complete before playback starts so the
   // session is active (silent mode on iOS, no-ducking on Android).
+  // Also switch the audio session back on every match: if a call or another
+  // app turned it off, nothing else ever would, and clips stay silent.
   useEffect(() => {
-    setAudioModeAsync({
-      playsInSilentMode: true,
-      interruptionMode: 'mixWithOthers',
-    }).catch(() => {});
+    setIsAudioActiveAsync(true)
+      .catch(() => {})
+      .then(() =>
+        setAudioModeAsync({
+          playsInSilentMode: true,
+          interruptionMode: 'mixWithOthers',
+        })
+      )
+      .catch(() => {});
   }, []);
 
   // Create/replace the player whenever the source changes.
@@ -56,6 +69,7 @@ export function useClipPlayback(previewUrl: string | null, startMs: number) {
     console.log('[useClipPlayback] Creating player for:', previewUrl);
     // Prefer the player the game store preloaded for this round (already
     // buffered); otherwise create one now.
+    markClipInUse(previewUrl);
     const preloaded = takeClip(previewUrl);
     const player = preloaded ?? createClipPlayer(previewUrl);
     console.log('[useClipPlayback] preloaded:', !!preloaded, 'loaded:', player.isLoaded);
@@ -77,8 +91,10 @@ export function useClipPlayback(previewUrl: string | null, startMs: number) {
     return () => {
       statusSub.remove();
       stopClip();
-      player.remove();
       playerRef.current = null;
+      markClipDone(previewUrl);
+      // remove() alone doesn't free the native player on Android.
+      disposeClipPlayer(player);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [previewUrl]);

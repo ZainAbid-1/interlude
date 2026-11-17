@@ -108,10 +108,10 @@ export type OpponentStatus =
 function calculatePoints(isCorrect: boolean, responseMs: number): number {
   if (!isCorrect) return 0;
   const basePoints = 100;
-  const speedBonus = Math.max(
-    0,
-    100 - Math.floor((responseMs / ROUND_DURATION_MS) * 100)
-  );
+  // Multiply first, exactly like grade_round_answer on the server:
+  // (ms / 8000) * 100 can land on 28.999… and give a 1-point different bonus.
+  const ms = Math.min(Math.max(Math.round(responseMs), 0), ROUND_DURATION_MS);
+  const speedBonus = Math.max(0, 100 - Math.floor((ms * 100) / ROUND_DURATION_MS));
   return basePoints + speedBonus;
 }
 
@@ -1498,14 +1498,14 @@ async function finalizeMatch() {
       correct_count: number;
       outcome: string | null;
     }>;
-    const mine = rows.find((r) => r.player_id === state.playerId);
+    // The results screen keeps the scores this phone showed during the match.
+    // The server's totals can briefly lag (the other phone's last answer may
+    // still be on its way), which made scores jump right after the match.
+    // finalize_match still records the match; whichever phone calls it last
+    // saves the complete totals for the leaderboard.
     const theirs = rows.find((r) => r.player_id !== state.playerId);
     useGameStore.setState({
       opponentId: theirs?.player_id ?? state.opponentId,
-      playerScore: mine?.total_score ?? state.playerScore,
-      opponentScore: theirs?.total_score ?? state.opponentScore,
-      playerCorrectCount: mine?.correct_count ?? state.playerCorrectCount,
-      opponentCorrectCount: theirs?.correct_count ?? state.opponentCorrectCount,
       gameOver: true,
     });
     return;
