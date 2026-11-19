@@ -160,8 +160,8 @@ docs/screenshots/       Images used in this README
 ### 1. Install
 
 ```bash
-git clone https://github.com/ZainAbid-1/musicapp.git
-cd musicapp
+git clone https://github.com/ZainAbid-1/interlude.git
+cd interlude
 npm install
 ```
 
