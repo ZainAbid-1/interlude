@@ -5,7 +5,6 @@ import {
   Pressable,
   StyleSheet,
   ActivityIndicator,
-  Alert,
   useWindowDimensions,
 } from 'react-native';
 import { WORDMARK_TEXT, wordmarkFontSize } from '../constants/wordmark';
@@ -14,6 +13,7 @@ import Animated, { FadeInDown, FadeInUp } from 'react-native-reanimated';
 import { Ionicons } from '@expo/vector-icons';
 import { AlbumCollageBackground } from '../components/AlbumCollageBackground';
 import { useAuthStore } from '../store/authStore';
+import { notify } from '../store/noticeStore';
 import { Colors, Spacing, BorderRadius } from '../constants/theme';
 
 // The wordmark is sized from the live window width so "INTERLUDE." always
@@ -37,13 +37,17 @@ export default function LoginScreen() {
       const { error } = await signInWithGoogle();
       setSigningIn(false);
       if (error) {
-        Alert.alert('Google Sign-In', error, [{ text: 'OK' }]);
+        notify.error("Couldn't sign in with Google", error, {
+          action: { label: 'Try again', onPress: () => handleGoogleSignIn() },
+        });
       } else {
         router.replace('/(tabs)');
       }
     } catch (e) {
       setSigningIn(false);
-      Alert.alert('Sign-in Error', (e as Error)?.message ?? 'An unexpected error occurred');
+      notify.error("Couldn't sign in", (e as Error)?.message ?? 'Something went wrong. Try again.', {
+        action: { label: 'Try again', onPress: () => handleGoogleSignIn() },
+      });
     }
   };
 

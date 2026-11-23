@@ -6,7 +6,6 @@ import {
   ScrollView,
   Pressable,
   ActivityIndicator,
-  Alert,
 } from 'react-native';
 import { router } from 'expo-router';
 import Animated, {
@@ -28,6 +27,8 @@ import {
   sendFriendRequest,
 } from '../services/friends';
 import { Colors, Spacing, BorderRadius } from '../constants/theme';
+import { notify } from '../store/noticeStore';
+import { offerPushNotifications } from '../services/push';
 
 export default function ResultsScreen() {
   const insets = useSafeAreaInsets();
@@ -241,8 +242,13 @@ function AddFriendButton({ opponentId }: { opponentId: string }) {
         ? await respondFriendRequest(opponentId, true)
         : await sendFriendRequest(opponentId);
     setBusy(false);
-    if (res.error) Alert.alert('Could not add friend', res.error);
-    else if (res.data) setRelation(res.data);
+    if (res.error) {
+      notify.error("Couldn't add friend", res.error);
+    } else if (res.data) {
+      setRelation(res.data);
+      notify.success(res.data === 'friend' ? 'You are now friends' : 'Friend request sent');
+      offerPushNotifications('friend');
+    }
   };
 
   const label =

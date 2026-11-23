@@ -1,7 +1,7 @@
 /// <reference path="../nativewind-env.d.ts" />
 import '../global.css';
 import React, { useEffect } from 'react';
-import { Stack } from 'expo-router';
+import { Stack, usePathname } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { View } from 'react-native';
 import {
@@ -19,6 +19,9 @@ import { Colors } from '../constants/theme';
 import { useAuthStore } from '../store/authStore';
 import { useInviteStore } from '../store/inviteStore';
 import { GameInviteBanner } from '../components/GameInviteBanner';
+import { NoticeToast } from '../components/NoticeToast';
+import { ConfirmSheet } from '../components/ConfirmSheet';
+import { usePushNotifications } from '../hooks/usePushNotifications';
 
 // Keep splash visible until fonts load
 SplashScreen.preventAutoHideAsync().catch(() => {});
@@ -47,6 +50,11 @@ export default function RootLayout() {
     useInviteStore.getState().start(userId);
     return () => useInviteStore.getState().stop();
   }, [userId]);
+
+  // Phone notifications: taps are acted on once signed in and past the
+  // start screen (which redirects while the app opens).
+  const pathname = usePathname();
+  usePushNotifications(userId, fontsLoaded && !!userId && pathname !== '/');
 
   useEffect(() => {
     if (fontsLoaded) {
@@ -89,6 +97,8 @@ export default function RootLayout() {
         />
       </Stack>
       <GameInviteBanner />
+      <NoticeToast />
+      <ConfirmSheet />
     </GestureHandlerRootView>
   );
 }

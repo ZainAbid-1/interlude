@@ -6,6 +6,7 @@ import * as QueryParams from 'expo-auth-session/build/QueryParams';
 import { Platform } from 'react-native';
 import { supabase } from '../lib/supabase';
 import { normalizeUsername, setUsername as setUsernameRpc } from '../services/friends';
+import { takePushToken } from '../services/pushToken';
 
 export interface UserProfile {
   id: string;
@@ -160,6 +161,15 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   signOut: async () => {
+    // While still signed in: stop this phone getting the old account's alerts.
+    const pushToken = takePushToken();
+    if (pushToken) {
+      try {
+        await supabase?.rpc('unregister_push_token', { p_token: pushToken });
+      } catch {
+        // Offline: the server forgets unused phones after 90 days anyway.
+      }
+    }
     set({ profile: null, session: null });
     await supabase?.auth.signOut();
   },

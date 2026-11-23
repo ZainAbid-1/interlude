@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, Image, Pressable, StyleSheet, ActivityIndicator, Alert } from 'react-native';
-import { router, usePathname } from 'expo-router';
+import { View, Text, Image, Pressable, StyleSheet, ActivityIndicator, AccessibilityInfo } from 'react-native';
+import * as Haptics from 'expo-haptics';
 import Animated, { FadeInUp, FadeOutUp } from 'react-native-reanimated';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -9,7 +9,7 @@ import { PlayerAvatar } from './PlayerAvatar';
 import { Colors, Spacing, BorderRadius } from '../constants/theme';
 import { useInviteStore } from '../store/inviteStore';
 import { useGameStore } from '../store/gameStore';
-import { useRoomStore } from '../store/roomStore';
+import { joinChallenge, declineChallenge } from '../services/challenge';
 
 /**
  * App-wide pop-up for an incoming challenge: "@zain challenges you · Drake".
@@ -17,9 +17,7 @@ import { useRoomStore } from '../store/roomStore';
  */
 export function GameInviteBanner() {
   const insets = useSafeAreaInsets();
-  const pathname = usePathname();
   const invite = useInviteStore((s) => s.incoming[0]);
-  const respond = useInviteStore((s) => s.respond);
   const inMatch = useGameStore((s) => s.currentRound !== null && !s.gameOver);
   const [busy, setBusy] = useState<'join' | 'decline' | null>(null);
   const [now, setNow] = useState(Date.now());
@@ -29,6 +27,16 @@ export function GameInviteBanner() {
     const t = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(t);
   }, [invite]);
+
+  // A short buzz and a spoken line when a new challenge appears.
+  const visibleId = invite && !inMatch ? invite.id : null;
+  useEffect(() => {
+    if (!visibleId || !invite) return;
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
+    const who = invite.from_display_name || invite.from_username || 'A friend';
+    AccessibilityInfo.announceForAccessibility(`${who} challenges you. ${invite.artist_name}. Join or decline.`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visibleId]);
 
   // Never cover a round in progress; the invite waits until the match ends.
   if (!invite || inMatch) return null;
@@ -40,32 +48,14 @@ export function GameInviteBanner() {
 
   const decline = async () => {
     setBusy('decline');
-    await respond(invite, false);
+    await declineChallenge(invite);
     setBusy(null);
   };
 
   const join = async () => {
     setBusy('join');
-    const res = await respond(invite, true);
-    if (res.error || !res.code) {
-      setBusy(null);
-      Alert.alert("Couldn't join", res.error ?? 'That room is no longer open');
-      return;
-    }
-    // Leave whatever lobby/match we were in, then join like typing the code.
-    const game = useGameStore.getState();
-    if (game.roomId && !game.gameOver) game.leaveMatch();
-    useInviteStore.getState().cancelOutgoing();
-    useRoomStore.getState().resetRoom();
-    const joined = await useRoomStore.getState().joinRoom(res.code);
+    await joinChallenge(invite);
     setBusy(null);
-    if (!joined.ok) {
-      Alert.alert("Couldn't join", joined.error ?? 'Something went wrong');
-      return;
-    }
-    // Already on the game screen (e.g. our own lobby): the new room id
-    // re-initialises it; otherwise open it.
-    if (pathname !== '/game') router.push('/game');
   };
 
   return (

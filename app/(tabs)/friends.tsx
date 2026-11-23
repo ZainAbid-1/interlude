@@ -8,7 +8,6 @@ import {
   ScrollView,
   ActivityIndicator,
   RefreshControl,
-  Alert,
   KeyboardAvoidingView,
   Platform,
   useWindowDimensions,
@@ -21,6 +20,8 @@ import { GlassCard } from '../../components/GlassCard';
 import { AlbumCollageBackground } from '../../components/AlbumCollageBackground';
 import { PlayerAvatar } from '../../components/PlayerAvatar';
 import { Colors, Spacing, BorderRadius } from '../../constants/theme';
+import { notify, confirm } from '../../store/noticeStore';
+import { offerPushNotifications } from '../../services/push';
 import { supabase } from '../../lib/supabase';
 import { useAuthStore } from '../../store/authStore';
 import {
@@ -142,7 +143,8 @@ export default function FriendsScreen() {
   const act = async (
     player: Player,
     action: () => Promise<{ data?: Relation | null; error?: string }>,
-    optimistic: Relation
+    optimistic: Relation,
+    done?: { title: string; offerPush?: boolean }
   ) => {
     setBusy((b) => new Set(b).add(player.id));
     const setRelation = (relation: Relation) => {
@@ -153,9 +155,13 @@ export default function FriendsScreen() {
     const res = await action();
     if (res.error) {
       setRelation(before);
-      Alert.alert('Something went wrong', res.error);
-    } else if (res.data) {
-      setRelation(res.data);
+      notify.error('Something went wrong', res.error, {
+        action: { label: 'Try again', onPress: () => act(player, action, optimistic, done) },
+      });
+    } else {
+      if (res.data) setRelation(res.data);
+      if (done) notify.success(done.title, undefined, { avatar: { uri: player.avatar_url, name: nameOf(player) } });
+      if (done?.offerPush) offerPushNotifications('friend');
     }
     await load();
     setBusy((b) => {
@@ -165,15 +171,25 @@ export default function FriendsScreen() {
     });
   };
 
-  const add = (p: Player) => act(p, () => sendFriendRequest(p.id), 'outgoing');
-  const accept = (p: Player) => act(p, () => respondFriendRequest(p.id, true), 'friend');
+  const add = (p: Player) =>
+    act(p, () => sendFriendRequest(p.id), 'outgoing', { title: `Request sent to ${nameOf(p)}`, offerPush: true });
+  const accept = (p: Player) =>
+    act(p, () => respondFriendRequest(p.id, true), 'friend', {
+      title: `You and ${nameOf(p)} are now friends`,
+      offerPush: true,
+    });
   const decline = (p: Player) => act(p, () => respondFriendRequest(p.id, false), 'none');
   const cancel = (p: Player) => act(p, () => removeFriend(p.id), 'none');
   const confirmRemove = (p: Player) =>
-    Alert.alert('Remove friend', `Remove ${nameOf(p)} from your friends?`, [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Remove', style: 'destructive', onPress: () => act(p, () => removeFriend(p.id), 'none') },
-    ]);
+    confirm({
+      title: `Remove ${nameOf(p)}?`,
+      message: 'They will leave your friends list. Your match history stays.',
+      confirmLabel: 'Remove friend',
+      destructive: true,
+      icon: 'person-remove-outline',
+    }).then((ok) => {
+      if (ok) act(p, () => removeFriend(p.id), 'none', { title: `Removed ${nameOf(p)}` });
+    });
 
   const incoming = useMemo(() => friends.filter((f) => f.relation === 'incoming'), [friends]);
   const accepted = useMemo(() => friends.filter((f) => f.relation === 'friend'), [friends]);

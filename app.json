@@ -30,7 +30,15 @@
       "expo-font",
       "expo-web-browser",
       "expo-audio",
-      "expo-asset"
+      "expo-asset",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/notification-icon.png",
+          "color": "#0a0a0a",
+          "defaultChannel": "challenges"
+        }
+      ]
     ],
     "extra": {
       "router": {},

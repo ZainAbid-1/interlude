@@ -1,13 +1,14 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   Pressable,
-  Alert,
   ScrollView,
   Switch,
   ActivityIndicator,
+  AppState,
+  Linking,
 } from 'react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { Ionicons } from '@expo/vector-icons';
@@ -18,6 +19,8 @@ import { Colors, Spacing, BorderRadius } from '../../constants/theme';
 import { useAuthStore } from '../../store/authStore';
 import { supabase } from '../../lib/supabase';
 import { GlassCard } from '../../components/GlassCard';
+import { notify, confirm } from '../../store/noticeStore';
+import { getPushPermission, requestPushPermission, type PushPermission } from '../../services/push';
 import { AlbumCollageBackground } from '../../components/AlbumCollageBackground';
 import { PlayerAvatar } from '../../components/PlayerAvatar';
 import { getLeaderboard, listLeaderboardArtists } from '../../services/leaderboard';
@@ -50,6 +53,20 @@ export default function SettingsScreen() {
   const [savingVisibility, setSavingVisibility] = useState(false);
   const [showScoring, setShowScoring] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
+  const [prefs, setPrefs] = useState<NotifyPrefs | null>(null);
+  const [push, setPush] = useState<{ status: PushPermission; canAsk: boolean } | null>(null);
+
+  // Re-check the phone's permission on focus and when coming back from the
+  // phone's settings, so the row is never out of date.
+  const refreshPush = useCallback(() => {
+    getPushPermission().then(setPush);
+  }, []);
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (st) => {
+      if (st === 'active') refreshPush();
+    });
+    return () => sub.remove();
+  }, [refreshPush]);
 
   const load = useCallback(async () => {
     if (!isLoggedIn || !profile?.id) return;
@@ -71,17 +88,23 @@ export default function SettingsScreen() {
     if (supabase) {
       const { data } = await supabase
         .from('profiles')
-        .select('discoverable')
+        .select('discoverable, notify_challenges, notify_friend_requests, notify_friend_accepts')
         .eq('id', profile.id)
         .maybeSingle();
       if (data && typeof data.discoverable === 'boolean') setDiscoverable(data.discoverable);
+      setPrefs({
+        notify_challenges: data?.notify_challenges ?? true,
+        notify_friend_requests: data?.notify_friend_requests ?? true,
+        notify_friend_accepts: data?.notify_friend_accepts ?? true,
+      });
     }
   }, [isLoggedIn, profile?.id]);
 
   useFocusEffect(
     useCallback(() => {
       load();
-    }, [load])
+      refreshPush();
+    }, [load, refreshPush])
   );
 
   const toggleDiscoverable = async (next: boolean) => {
@@ -96,24 +119,49 @@ export default function SettingsScreen() {
     setSavingVisibility(false);
     if (error) {
       setDiscoverable(prev);
-      Alert.alert('Could not save', 'Check your connection and try again.');
+      notify.error("Couldn't save that change", 'Check your connection and try again.', {
+        action: { label: 'Try again', onPress: () => toggleDiscoverable(next) },
+      });
     }
   };
 
-  const handleSignOut = () => {
-    Alert.alert('Log out of Interlude?', 'You can sign back in with Google anytime.', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Log out',
-        style: 'destructive',
-        onPress: async () => {
-          setSigningOut(true);
-          await signOut();
-          setSigningOut(false);
-          router.replace('/login');
-        },
-      },
-    ]);
+  const savePref = async (key: keyof NotifyPrefs, next: boolean) => {
+    if (!supabase || !profile?.id || !prefs) return;
+    const before = prefs;
+    setPrefs({ ...prefs, [key]: next }); // optimistic
+    const { error } = await supabase.from('profiles').update({ [key]: next }).eq('id', profile.id);
+    if (error) {
+      setPrefs(before);
+      notify.error("Couldn't save that change", 'Check your connection and try again.', {
+        action: { label: 'Try again', onPress: () => savePref(key, next) },
+      });
+    }
+  };
+
+  const turnOnPush = async () => {
+    if (push?.status === 'denied' || (push && !push.canAsk)) {
+      // The phone won't ask again; only its own settings can switch it on.
+      Linking.openSettings().catch(() => {});
+      return;
+    }
+    const result = await requestPushPermission();
+    refreshPush();
+    if (result === 'granted') notify.success('Notifications are on');
+  };
+
+  const handleSignOut = async () => {
+    const ok = await confirm({
+      title: 'Log out of Interlude?',
+      message: 'You can sign back in with Google anytime.',
+      confirmLabel: 'Log out',
+      destructive: true,
+      icon: 'log-out-outline',
+    });
+    if (!ok) return;
+    setSigningOut(true);
+    await signOut();
+    setSigningOut(false);
+    router.replace('/login');
   };
 
   const name = profile?.display_name || (profile?.username ? `@${profile.username}` : 'Not signed in');
@@ -234,6 +282,45 @@ export default function SettingsScreen() {
           </Animated.View>
         ) : null}
 
+        {/* Notifications */}
+        {isLoggedIn ? (
+          <Animated.View entering={FadeInDown.delay(225).duration(500)}>
+            <SectionLabel>Notifications</SectionLabel>
+            <GlassCard borderRadius={20} padding={0}>
+              <PushStatusRow push={push} onTurnOn={turnOnPush} />
+              {(
+                [
+                  ['notify_challenges', 'flash-outline', 'Challenges', 'When a friend challenges you to a match'],
+                  ['notify_friend_requests', 'person-add-outline', 'Friend requests', 'When someone wants to be your friend'],
+                  ['notify_friend_accepts', 'people-outline', 'Accepted requests', 'When someone accepts your friend request'],
+                ] as const
+              ).map(([key, icon, title, hint]) => (
+                <Row
+                  key={key}
+                  divider
+                  icon={icon}
+                  title={title}
+                  hint={hint}
+                  dimmed={push?.status !== 'granted'}
+                  right={
+                    prefs === null ? (
+                      <ActivityIndicator color="#ffffff" />
+                    ) : (
+                      <Switch
+                        value={prefs[key]}
+                        onValueChange={(v) => savePref(key, v)}
+                        trackColor={{ false: 'rgba(255,255,255,0.18)', true: Colors.correct }}
+                        thumbColor="#ffffff"
+                        accessibilityLabel={`${title} notifications`}
+                      />
+                    )
+                  }
+                />
+              ))}
+            </GlassCard>
+          </Animated.View>
+        ) : null}
+
         {/* Help */}
         <Animated.View entering={FadeInDown.delay(250).duration(500)}>
           <SectionLabel>Help</SectionLabel>
@@ -301,6 +388,63 @@ export default function SettingsScreen() {
   );
 }
 
+interface NotifyPrefs {
+  notify_challenges: boolean;
+  notify_friend_requests: boolean;
+  notify_friend_accepts: boolean;
+}
+
+/** Says plainly whether phone notifications work, and how to fix it if not. */
+function PushStatusRow({
+  push,
+  onTurnOn,
+}: {
+  push: { status: PushPermission; canAsk: boolean } | null;
+  onTurnOn: () => void;
+}) {
+  if (!push) {
+    return <Row icon="notifications-outline" title="Phone notifications" right={<ActivityIndicator color="#ffffff" />} />;
+  }
+  if (push.status === 'unsupported') {
+    return (
+      <Row
+        icon="notifications-off-outline"
+        title="Phone notifications"
+        hint="Available in the Interlude app for Android and iPhone."
+      />
+    );
+  }
+  if (push.status === 'granted') {
+    return (
+      <Row
+        icon="notifications"
+        title="Phone notifications"
+        hint="On. Alerts arrive even when Interlude is closed. Choose which ones below."
+        right={
+          <View style={styles.onPill}>
+            <View style={styles.onDot} />
+            <Text style={styles.onPillText}>On</Text>
+          </View>
+        }
+      />
+    );
+  }
+  const blocked = push.status === 'denied' || !push.canAsk;
+  return (
+    <Row
+      icon="notifications-off-outline"
+      title="Phone notifications"
+      hint={
+        blocked
+          ? "Off in your phone's settings. Turn them on there to hear about challenges while the app is closed."
+          : "Off. Turn on to hear about challenges while the app is closed."
+      }
+      value={blocked ? 'Open settings' : 'Turn on'}
+      onPress={onTurnOn}
+    />
+  );
+}
+
 function SectionLabel({ children }: { children: string }) {
   return <Text style={styles.sectionLabel}>{children}</Text>;
 }
@@ -338,6 +482,7 @@ function Row({
   chevron,
   onPress,
   divider,
+  dimmed,
 }: {
   icon: IconName;
   title: string;
@@ -347,9 +492,11 @@ function Row({
   chevron?: IconName;
   onPress?: () => void;
   divider?: boolean;
+  /** Still usable, but shown faded (e.g. alerts while the phone blocks them). */
+  dimmed?: boolean;
 }) {
   const body = (
-    <View style={[styles.row, divider && styles.rowDivider]}>
+    <View style={[styles.row, divider && styles.rowDivider, dimmed && styles.rowDimmed]}>
       <View style={styles.rowIcon}>
         <Ionicons name={icon} size={19} color="#ffffff" />
       </View>
@@ -375,6 +522,18 @@ function Row({
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: Colors.background },
   scroll: { flex: 1 },
+  rowDimmed: { opacity: 0.55 },
+  onPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    height: 28,
+    paddingHorizontal: 12,
+    borderRadius: 14,
+    backgroundColor: Colors.correctBg,
+  },
+  onDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: Colors.correct },
+  onPillText: { fontFamily: 'Inter-Bold', fontSize: 13, color: Colors.correct },
   scrollContent: { padding: Spacing.containerPadding, gap: Spacing.md },
   flex: { flex: 1 },
   header: { marginTop: Spacing.md, marginBottom: Spacing.xs },

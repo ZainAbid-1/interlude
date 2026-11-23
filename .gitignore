@@ -40,3 +40,7 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# Firebase config for push notifications (added as an EAS file variable)
+google-services.json
+GoogleService-Info.plist

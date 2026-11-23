@@ -9,7 +9,6 @@ import {
   Image,
   Share,
   TextInput,
-  Alert,
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
@@ -34,6 +33,8 @@ import Animated, {
 import { MaterialCommunityIcons, Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Clipboard from 'expo-clipboard';
+import { notify, confirm } from '../../store/noticeStore';
+import { offerPushNotifications } from '../../services/push';
 
 import { GlassCard } from '../../components/GlassCard';
 import { AlbumCollageBackground } from '../../components/AlbumCollageBackground';
@@ -142,7 +143,9 @@ export default function HomeScreen() {
     if (!chosenArtist || creatingRoom) return false;
     const res = await createRoom(chosenArtist);
     if (!res.ok) {
-      Alert.alert('Could not create room', res.error ?? 'Something went wrong');
+      notify.error("Couldn't set up the room", res.error ?? 'Check your connection and try again.', {
+        action: { label: 'Try again', onPress: () => ensureRoom() },
+      });
       return false;
     }
     return true;
@@ -173,7 +176,9 @@ export default function HomeScreen() {
     if (roomCode) resetRoom();
     const res = await createRoom(artist);
     if (!res.ok) {
-      Alert.alert('Could not create room', res.error ?? 'Something went wrong');
+      notify.error("Couldn't set up the room", res.error ?? 'Check your connection and try again.', {
+        action: { label: 'Try again', onPress: () => selectArtist(artist) },
+      });
       return;
     }
     // Came here from a friend's "Play" button: challenge them right away.
@@ -233,9 +238,13 @@ export default function HomeScreen() {
     const res = await useInviteStore.getState().invite(friend, roomId);
     setInvitingId(null);
     if (res.error) {
-      Alert.alert("Couldn't send the challenge", res.error);
+      notify.error(`Couldn't challenge ${friend.name}`, res.error, {
+        action: { label: 'Try again', onPress: () => challengeFriend(friend) },
+      });
       return;
     }
+    // A good moment to offer notifications: they just challenged someone.
+    offerPushNotifications('challenge');
     // Into the lobby: the match starts the moment they tap Join.
     router.push('/game');
   };
@@ -244,7 +253,7 @@ export default function HomeScreen() {
     if (joinCode.length === 6) {
       const res = await joinRoom(joinCode);
       if (!res.ok) {
-        Alert.alert('Could not join room', res.error ?? 'Something went wrong');
+        notify.error("Couldn't join that room", res.error ?? 'Check the code and try again.');
         return;
       }
       router.push('/game');
@@ -810,21 +819,16 @@ function AuthPill({ compact = false }: { compact?: boolean }) {
 
   const handlePress = async () => {
     if (session) {
-      Alert.alert(
-        profile?.display_name ?? 'Interlude Player',
-        'Signed in with Google',
-        [
-          { text: 'Cancel', style: 'cancel' },
-          {
-            text: 'Sign out',
-            style: 'destructive',
-            onPress: async () => {
-              await signOut();
-              router.replace('/login');
-            },
-          },
-        ]
-      );
+      const ok = await confirm({
+        title: 'Log out of Interlude?',
+        message: `Signed in as ${profile?.display_name ?? 'Interlude player'} with Google. You can sign back in anytime.`,
+        confirmLabel: 'Log out',
+        destructive: true,
+        icon: 'log-out-outline',
+      });
+      if (!ok) return;
+      await signOut();
+      router.replace('/login');
       return;
     }
     router.replace('/login');

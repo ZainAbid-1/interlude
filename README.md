@@ -22,6 +22,7 @@ Interlude is a real-time, two-player music guessing game for Android and iOS. Pi
 - **Friends and usernames.** Search players by username or name, send requests, and track your record against each friend.
 - **Head to head.** See who owns the rivalry, win streaks, and which artists you've battled over.
 - **Leaderboards.** Per-artist boards rank your best match. The All artists board uses an **Elo rating**, so beating stronger players counts for more.
+- **Notifications.** Challenges and friend requests reach you even when the app is closed, with Join and Decline right on the notification. Inside the app, messages use the same dark, themed cards, and you choose which alerts you get in Settings.
 - **Built for flaky networks.** Detects when the other player drops, pauses the match, and resyncs on reconnect.
 - **Server-side checks.** Answers are graded on the server, so a modified app can't claim a wrong answer was right.
 
@@ -190,6 +191,7 @@ In the Supabase **SQL editor**, run these files from `supabase/` **in this order
 | 6 | `leaderboard.sql` | Leaderboard functions |
 | 7 | `scoring_device_time.sql` | Grades with the phone's answer time |
 | 8 | `elo.sql` | Elo ratings + the All artists board |
+| 9 | `notifications.sql` | Phone notifications for challenges and friend requests |
 
 All files are safe to run more than once. `add_pool_options.sql` and `leaderboard_week_fix.sql` are upgrades for older databases and aren't needed on a fresh install.
 
@@ -211,7 +213,20 @@ npx supabase functions deploy spotify
 
 The function only lets signed-in players through, and only for the read-only endpoints the game uses.
 
-### 5. Run
+### 5. Phone notifications (Android)
+
+Android delivers notifications through Firebase, so it needs a one-time setup:
+
+1. In the [Firebase console](https://console.firebase.google.com), create a project and add an Android app with the package name `com.zainabid_12.interlude`. Download its `google-services.json`.
+2. Put `google-services.json` in the project folder for local builds. It's in `.gitignore`. For EAS builds, upload it as a file variable:
+   ```bash
+   npx eas-cli env:create --name GOOGLE_SERVICES_JSON --type file --value ./google-services.json --visibility secret --environment development --environment preview --environment production
+   ```
+3. In Firebase, go to **Project settings → Service accounts → Generate new private key**, then upload that key with `npx eas-cli credentials` (Android → Google Service Account → FCM V1).
+
+Without this, the app still works; it just can't receive notifications while closed. `notifications.sql` sends the notifications through Expo's push service from the database, using Supabase's `pg_net` extension.
+
+### 6. Run
 
 Build and install a development build once (and again whenever you add a native package):
 
@@ -225,7 +240,7 @@ Then start Metro and open the app on your device:
 npx expo start --dev-client
 ```
 
-### 6. Build a shareable APK
+### 7. Build a shareable APK
 
 ```bash
 npx eas-cli build --profile preview --platform android
