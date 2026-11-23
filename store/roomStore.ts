@@ -20,6 +20,8 @@ interface RoomState {
   guestName: string | null;
   artistName: string;
   artistImage: string;
+  /** The artist this host built the room for (null when joined as guest). */
+  artist: SpotifyArtist | null;
 
   // Pool (persisted tracks with previews)
   poolId: string;
@@ -52,6 +54,7 @@ export const useRoomStore = create<RoomState>((set, get) => ({
   guestName: null,
   artistName: '',
   artistImage: '',
+  artist: null,
   poolId: '',
   poolTracks: [],
   isHost: false,
@@ -99,6 +102,7 @@ export const useRoomStore = create<RoomState>((set, get) => ({
       guestName: null,
       artistName: artist.name,
       artistImage: artist.image,
+      artist,
       poolId: saved.poolId,
       poolTracks: pool.tracks.map((t, i) => ({
         id: '',
@@ -138,6 +142,7 @@ export const useRoomStore = create<RoomState>((set, get) => ({
       guestName: 'You',
       artistName: result.artist.name,
       artistImage: result.artist.image,
+      artist: null,
       poolId: result.room.track_pool_id,
       poolTracks: result.tracks,
       isHost: false,
@@ -162,6 +167,7 @@ export const useRoomStore = create<RoomState>((set, get) => ({
       guestName: null,
       artistName: '',
       artistImage: '',
+      artist: null,
       poolId: '',
       poolTracks: [],
       isHost: false,

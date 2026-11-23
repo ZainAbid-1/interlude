@@ -80,9 +80,11 @@ export async function getPushPermission(): Promise<{ status: PushPermission; can
   if (!pushSupported) return { status: 'unsupported', canAsk: false };
   try {
     const p = await Notifications.getPermissionsAsync();
+    // Android 13+ reports "never asked" as denied; only a refusal the phone
+    // won't ask about again is a real no.
     const status: PushPermission = p.granted
       ? 'granted'
-      : p.status === 'undetermined'
+      : p.status === 'undetermined' || p.canAskAgain
         ? 'undetermined'
         : 'denied';
     return { status, canAsk: p.canAskAgain };
@@ -147,22 +149,37 @@ export async function offerPushNotifications(reason: 'friend' | 'challenge') {
 
 // ── Registering this phone ─────────────────────────────────────────────
 
-/** Gives this phone's address to the server, if notifications are allowed. */
-export async function registerPush() {
-  if (!pushSupported) return;
+/** Why this phone couldn't be registered last time (null = it worked). */
+let lastRegisterError: string | null = null;
+export function getPushRegisterError() {
+  return lastRegisterError;
+}
+
+/**
+ * Gives this phone's address to the server, if notifications are allowed.
+ * Returns null on success, or a reason Settings can show.
+ */
+export async function registerPush(): Promise<string | null> {
+  if (!pushSupported) return null;
   const { status } = await getPushPermission();
-  if (status !== 'granted') return;
+  if (status !== 'granted') return null;
   await configurePush();
+  let step = 'Getting this phone’s notification address';
   try {
     const projectId =
       Constants.expoConfig?.extra?.eas?.projectId ?? Constants.easConfig?.projectId;
     const token = (await Notifications.getExpoPushTokenAsync({ projectId })).data;
     setPushToken(token);
-    await rpc('register_push_token', { p_token: token, p_platform: Platform.OS });
+    step = 'Saving it to the server';
+    const res = await rpc('register_push_token', { p_token: token, p_platform: Platform.OS });
+    if (res.error) throw new Error(res.error);
+    lastRegisterError = null;
   } catch (e) {
-    // Offline, or the build has no Firebase setup yet. Tried again next launch.
-    console.warn('[push] could not register this phone:', (e as Error)?.message);
+    // Offline, no Firebase in this build, or notifications.sql not run.
+    lastRegisterError = `${step} failed: ${(e as Error)?.message ?? 'unknown error'}`;
+    console.warn('[push]', lastRegisterError);
   }
+  return lastRegisterError;
 }
 
 // ── What a notification does ───────────────────────────────────────────

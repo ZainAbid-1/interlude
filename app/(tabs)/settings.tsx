@@ -5,7 +5,6 @@ import {
   StyleSheet,
   Pressable,
   ScrollView,
-  Switch,
   ActivityIndicator,
   AppState,
   Linking,
@@ -19,8 +18,10 @@ import { Colors, Spacing, BorderRadius } from '../../constants/theme';
 import { useAuthStore } from '../../store/authStore';
 import { supabase } from '../../lib/supabase';
 import { GlassCard } from '../../components/GlassCard';
+import { ToggleSwitch } from '../../components/ToggleSwitch';
+import { haptic } from '../../lib/haptics';
 import { notify, confirm } from '../../store/noticeStore';
-import { getPushPermission, requestPushPermission, type PushPermission } from '../../services/push';
+import { getPushPermission, requestPushPermission, registerPush, type PushPermission } from '../../services/push';
 import { AlbumCollageBackground } from '../../components/AlbumCollageBackground';
 import { PlayerAvatar } from '../../components/PlayerAvatar';
 import { getLeaderboard, listLeaderboardArtists } from '../../services/leaderboard';
@@ -58,8 +59,16 @@ export default function SettingsScreen() {
 
   // Re-check the phone's permission on focus and when coming back from the
   // phone's settings, so the row is never out of date.
-  const refreshPush = useCallback(() => {
-    getPushPermission().then(setPush);
+  const [pushError, setPushError] = useState<string | null>(null);
+  const [checkingPush, setCheckingPush] = useState(false);
+  const refreshPush = useCallback(async () => {
+    const p = await getPushPermission();
+    setPush(p);
+    if (p.status !== 'granted') return;
+    // "On" only counts once the server really has this phone's address.
+    setCheckingPush(true);
+    setPushError(await registerPush());
+    setCheckingPush(false);
   }, []);
   useEffect(() => {
     const sub = AppState.addEventListener('change', (st) => {
@@ -254,7 +263,7 @@ export default function SettingsScreen() {
                   onPress={() => router.push('/username?edit=1')}
                 />
               ) : null}
-              <Row
+              <ToggleRow
                 divider={profile?.username !== undefined}
                 icon="eye-outline"
                 title="Show me in player search"
@@ -263,20 +272,9 @@ export default function SettingsScreen() {
                     ? 'Off: only existing friends can find you, and you are hidden from the global leaderboard.'
                     : 'Anyone can find you by name or username and see you on the global leaderboard.'
                 }
-                right={
-                  discoverable === null ? (
-                    <ActivityIndicator color="#ffffff" />
-                  ) : (
-                    <Switch
-                      value={discoverable}
-                      onValueChange={toggleDiscoverable}
-                      disabled={savingVisibility}
-                      trackColor={{ false: 'rgba(255,255,255,0.18)', true: Colors.correct }}
-                      thumbColor="#ffffff"
-                      accessibilityLabel="Show me in player search"
-                    />
-                  )
-                }
+                value={discoverable}
+                disabled={savingVisibility}
+                onChange={toggleDiscoverable}
               />
             </GlassCard>
           </Animated.View>
@@ -287,34 +285,29 @@ export default function SettingsScreen() {
           <Animated.View entering={FadeInDown.delay(225).duration(500)}>
             <SectionLabel>Notifications</SectionLabel>
             <GlassCard borderRadius={20} padding={0}>
-              <PushStatusRow push={push} onTurnOn={turnOnPush} />
+              <PushStatusCard
+                push={push}
+                error={pushError}
+                checking={checkingPush}
+                onTurnOn={turnOnPush}
+                onRetry={refreshPush}
+              />
+              <Text style={styles.groupLabel}>Send me alerts for</Text>
               {(
                 [
-                  ['notify_challenges', 'flash-outline', 'Challenges', 'When a friend challenges you to a match'],
-                  ['notify_friend_requests', 'person-add-outline', 'Friend requests', 'When someone wants to be your friend'],
-                  ['notify_friend_accepts', 'people-outline', 'Accepted requests', 'When someone accepts your friend request'],
+                  ['notify_challenges', 'flash-outline', 'Challenges', 'A friend challenges you to a match. You have 2 minutes to join.'],
+                  ['notify_friend_requests', 'person-add-outline', 'Friend requests', 'Someone wants to add you as a friend.'],
+                  ['notify_friend_accepts', 'people-outline', 'Accepted requests', 'Someone accepts your friend request.'],
                 ] as const
-              ).map(([key, icon, title, hint]) => (
-                <Row
+              ).map(([key, icon, title, hint], i) => (
+                <ToggleRow
                   key={key}
-                  divider
+                  divider={i > 0}
                   icon={icon}
                   title={title}
                   hint={hint}
-                  dimmed={push?.status !== 'granted'}
-                  right={
-                    prefs === null ? (
-                      <ActivityIndicator color="#ffffff" />
-                    ) : (
-                      <Switch
-                        value={prefs[key]}
-                        onValueChange={(v) => savePref(key, v)}
-                        trackColor={{ false: 'rgba(255,255,255,0.18)', true: Colors.correct }}
-                        thumbColor="#ffffff"
-                        accessibilityLabel={`${title} notifications`}
-                      />
-                    )
-                  }
+                  value={prefs ? prefs[key] : null}
+                  onChange={(v) => savePref(key, v)}
                 />
               ))}
             </GlassCard>
@@ -394,54 +387,153 @@ interface NotifyPrefs {
   notify_friend_accepts: boolean;
 }
 
-/** Says plainly whether phone notifications work, and how to fix it if not. */
-function PushStatusRow({
+type PushTone = 'good' | 'off' | 'bad' | 'info';
+const TONE: Record<PushTone, { color: string; bg: string }> = {
+  good: { color: Colors.correct, bg: Colors.correctBg },
+  off: { color: '#ffffff', bg: 'rgba(255, 255, 255, 0.1)' },
+  bad: { color: Colors.incorrect, bg: Colors.incorrectBg },
+  info: { color: '#ffffff', bg: 'rgba(255, 255, 255, 0.1)' },
+};
+
+/**
+ * Answers one question: will this phone tell me when a friend challenges me?
+ * Each state comes with the one action that fixes it.
+ */
+function PushStatusCard({
   push,
+  error,
+  checking,
   onTurnOn,
+  onRetry,
 }: {
   push: { status: PushPermission; canAsk: boolean } | null;
+  error: string | null;
+  checking: boolean;
   onTurnOn: () => void;
+  onRetry: () => void;
 }) {
   if (!push) {
-    return <Row icon="notifications-outline" title="Phone notifications" right={<ActivityIndicator color="#ffffff" />} />;
+    return (
+      <View style={[styles.statusCard, styles.statusLoading]}>
+        <ActivityIndicator color="#ffffff" />
+      </View>
+    );
   }
+
+  let tone: PushTone;
+  let icon: IconName;
+  let title: string;
+  let text: string;
+  let action: { label: string; onPress: () => void } | null = null;
+
   if (push.status === 'unsupported') {
-    return (
-      <Row
-        icon="notifications-off-outline"
-        title="Phone notifications"
-        hint="Available in the Interlude app for Android and iPhone."
-      />
-    );
+    tone = 'info';
+    icon = 'phone-portrait-outline';
+    title = 'Alerts go to your phone';
+    text =
+      "The web version can't show notifications. Open Interlude on your Android phone or iPhone to get them. The choices below apply there.";
+  } else if (push.status === 'granted' && error) {
+    tone = 'bad';
+    icon = 'warning-outline';
+    title = 'Not working on this phone';
+    text = `Notifications are allowed, but this phone couldn't be set up to receive them. ${error}`;
+    action = { label: 'Try again', onPress: onRetry };
+  } else if (push.status === 'granted') {
+    tone = 'good';
+    icon = 'notifications';
+    title = 'On for this phone';
+    text = "You'll be alerted even when Interlude is closed.";
+  } else if (push.status === 'denied' || !push.canAsk) {
+    tone = 'bad';
+    icon = 'notifications-off-outline';
+    title = "Blocked in your phone's settings";
+    text = 'In the settings that open, tap Notifications and switch them on for Interlude.';
+    action = { label: 'Open phone settings', onPress: onTurnOn };
+  } else {
+    tone = 'off';
+    icon = 'notifications-off-outline';
+    title = 'Off on this phone';
+    text = "Turn on so you don't miss a friend's challenge. Challenges only last 2 minutes.";
+    action = { label: 'Turn on notifications', onPress: onTurnOn };
   }
-  if (push.status === 'granted') {
-    return (
-      <Row
-        icon="notifications"
-        title="Phone notifications"
-        hint="On. Alerts arrive even when Interlude is closed. Choose which ones below."
-        right={
-          <View style={styles.onPill}>
-            <View style={styles.onDot} />
-            <Text style={styles.onPillText}>On</Text>
-          </View>
-        }
-      />
-    );
-  }
-  const blocked = push.status === 'denied' || !push.canAsk;
+
+  const t = TONE[tone];
   return (
-    <Row
-      icon="notifications-off-outline"
-      title="Phone notifications"
-      hint={
-        blocked
-          ? "Off in your phone's settings. Turn them on there to hear about challenges while the app is closed."
-          : "Off. Turn on to hear about challenges while the app is closed."
-      }
-      value={blocked ? 'Open settings' : 'Turn on'}
-      onPress={onTurnOn}
-    />
+    <View style={styles.statusCard}>
+      <View style={styles.statusTop} accessible accessibilityLabel={`${title}. ${text}`}>
+        <View style={[styles.statusIcon, { backgroundColor: t.bg }]}>
+          <Ionicons name={icon} size={22} color={t.color} />
+        </View>
+        <View style={styles.flex}>
+          <Text style={[styles.statusTitle, tone === 'good' && { color: Colors.correct }]}>{title}</Text>
+          <Text style={styles.statusText}>{text}</Text>
+        </View>
+      </View>
+      {action ? (
+        <Pressable onPress={action.onPress} disabled={checking} accessibilityRole="button">
+          <View style={[styles.statusButton, tone === 'bad' && styles.statusButtonQuiet]}>
+            {checking ? (
+              <ActivityIndicator color={tone === 'bad' ? '#ffffff' : '#000000'} />
+            ) : (
+              <Text style={[styles.statusButtonText, tone === 'bad' && { color: '#ffffff' }]}>
+                {action.label}
+              </Text>
+            )}
+          </View>
+        </Pressable>
+      ) : null}
+    </View>
+  );
+}
+
+/** A setting you switch on or off. The whole row is the tap target. */
+function ToggleRow({
+  icon,
+  title,
+  hint,
+  value,
+  onChange,
+  disabled,
+  divider,
+}: {
+  icon: IconName;
+  title: string;
+  hint?: string;
+  value: boolean | null;
+  onChange: (next: boolean) => void;
+  disabled?: boolean;
+  divider?: boolean;
+}) {
+  const ready = value !== null;
+  return (
+    <Pressable
+      onPress={() => {
+        if (!ready || disabled) return;
+        haptic.select();
+        onChange(!value);
+      }}
+      disabled={!ready || disabled}
+      accessibilityRole="switch"
+      accessibilityLabel={title}
+      accessibilityHint={hint}
+      accessibilityState={{ checked: !!value, disabled: !ready || !!disabled }}
+      android_ripple={{ color: 'rgba(255,255,255,0.08)' }}
+    >
+      <View style={[styles.row, divider && styles.rowDivider]}>
+        <View style={styles.rowIcon}>
+          <Ionicons name={icon} size={19} color="#ffffff" />
+        </View>
+        <View style={styles.flex}>
+          <Text style={styles.rowTitle}>{title}</Text>
+          {hint ? <Text style={styles.rowHint}>{hint}</Text> : null}
+        </View>
+        {ready ? (
+          <ToggleSwitch value={!!value} disabled={disabled} decorative />
+        ) : (
+          <ActivityIndicator color="#ffffff" />
+        )}
+      </View>
+    </Pressable>
   );
 }
 
@@ -482,7 +574,6 @@ function Row({
   chevron,
   onPress,
   divider,
-  dimmed,
 }: {
   icon: IconName;
   title: string;
@@ -492,11 +583,9 @@ function Row({
   chevron?: IconName;
   onPress?: () => void;
   divider?: boolean;
-  /** Still usable, but shown faded (e.g. alerts while the phone blocks them). */
-  dimmed?: boolean;
 }) {
   const body = (
-    <View style={[styles.row, divider && styles.rowDivider, dimmed && styles.rowDimmed]}>
+    <View style={[styles.row, divider && styles.rowDivider]}>
       <View style={styles.rowIcon}>
         <Ionicons name={icon} size={19} color="#ffffff" />
       </View>
@@ -522,7 +611,38 @@ function Row({
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: Colors.background },
   scroll: { flex: 1 },
-  rowDimmed: { opacity: 0.55 },
+  statusCard: { padding: 16, gap: 14 },
+  statusLoading: { alignItems: 'center', paddingVertical: 28 },
+  statusTop: { flexDirection: 'row', alignItems: 'flex-start', gap: 14 },
+  statusIcon: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
+  statusTitle: { fontFamily: 'Inter-Bold', fontSize: 16, lineHeight: 21, color: '#ffffff' },
+  statusText: { fontFamily: 'Inter', fontSize: 13, lineHeight: 18, color: Colors.textSubtle, marginTop: 3 },
+  statusButton: {
+    height: 46,
+    borderRadius: 23,
+    backgroundColor: '#ffffff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 16,
+  },
+  statusButtonQuiet: {
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.18)',
+  },
+  statusButtonText: { fontFamily: 'Inter-Bold', fontSize: 15, color: '#000000' },
+  groupLabel: {
+    fontFamily: 'Inter-Bold',
+    fontSize: 11,
+    letterSpacing: 1.2,
+    textTransform: 'uppercase',
+    color: Colors.textMuted,
+    paddingHorizontal: 16,
+    paddingTop: 14,
+    paddingBottom: 2,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: 'rgba(255, 255, 255, 0.1)',
+  },
   onPill: {
     flexDirection: 'row',
     alignItems: 'center',

@@ -4,7 +4,7 @@ import Animated, { FadeIn, SlideInDown } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
-import * as Haptics from 'expo-haptics';
+import { haptic } from '../lib/haptics';
 import { Colors, Spacing, BorderRadius } from '../constants/theme';
 import { useNoticeStore } from '../store/noticeStore';
 
@@ -19,7 +19,7 @@ export function ConfirmSheet() {
 
   useEffect(() => {
     if (dialog?.destructive) {
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
+      haptic.warning();
     }
   }, [dialog]);
 

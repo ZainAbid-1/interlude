@@ -12,7 +12,7 @@ import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
-import * as Haptics from 'expo-haptics';
+import { haptic } from '../lib/haptics';
 import { PlayerAvatar } from './PlayerAvatar';
 import { Colors, Spacing, BorderRadius } from '../constants/theme';
 import { useNoticeStore, type Notice } from '../store/noticeStore';
@@ -47,11 +47,11 @@ function ToastCard({ notice }: { notice: Notice }) {
 
   useEffect(() => {
     if (notice.kind === 'error') {
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => {});
+      haptic.error();
     } else if (notice.kind === 'success') {
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+      haptic.success();
     } else {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+      haptic.tap();
     }
     AccessibilityInfo.announceForAccessibility(
       [notice.title, notice.message].filter(Boolean).join('. ')

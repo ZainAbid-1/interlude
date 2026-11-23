@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, Image, Pressable, StyleSheet, ActivityIndicator, AccessibilityInfo } from 'react-native';
-import * as Haptics from 'expo-haptics';
+import { haptic } from '../lib/haptics';
 import Animated, { FadeInUp, FadeOutUp } from 'react-native-reanimated';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -32,7 +32,7 @@ export function GameInviteBanner() {
   const visibleId = invite && !inMatch ? invite.id : null;
   useEffect(() => {
     if (!visibleId || !invite) return;
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
+    haptic.warning();
     const who = invite.from_display_name || invite.from_username || 'A friend';
     AccessibilityInfo.announceForAccessibility(`${who} challenges you. ${invite.artist_name}. Join or decline.`);
     // eslint-disable-next-line react-hooks/exhaustive-deps

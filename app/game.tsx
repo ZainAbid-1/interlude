@@ -175,8 +175,9 @@ export default function GameScreen() {
     useInviteStore.getState().cancelOutgoing();
     useGameStore.getState().leaveMatch();
     // A match that already started can't be rejoined; the lobby keeps its
-    // room so the host can still share the code.
-    if (useGameStore.getState().currentRound || currentRound) {
+    // room so the host can still share the code. A guest has nothing to
+    // come back to, so their copy of the host's room is dropped.
+    if (useGameStore.getState().currentRound || currentRound || !useRoomStore.getState().isHost) {
       useRoomStore.getState().resetRoom();
     }
     router.replace('/');

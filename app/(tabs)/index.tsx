@@ -19,6 +19,7 @@ import { WORDMARK_TEXT, wordmarkFontSize } from '../../constants/wordmark';
 import { PlayerAvatar } from '../../components/PlayerAvatar';
 import { listFriends, Friend } from '../../services/friends';
 import { useInviteStore } from '../../store/inviteStore';
+import { useGameStore } from '../../store/gameStore';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -74,11 +75,17 @@ export default function HomeScreen() {
   const logo = logoLayout(windowWidth);
   const [joinCode, setJoinCode] = useState('');
   const [showJoinInput, setShowJoinInput] = useState(false);
-  const [showCreate, setShowCreate] = useState(false);
+  // A room you made is still open (e.g. you left the lobby, or a friend
+  // declined): come back to it, artist and code together.
+  const openRoomArtist = () => {
+    const r = useRoomStore.getState();
+    return r.roomCode && r.isHost ? r.artist : null;
+  };
+  const [showCreate, setShowCreate] = useState(() => !!openRoomArtist());
   const [copied, setCopied] = useState(false);
 
-  const [chosenArtist, setChosenArtist] = useState<SpotifyArtist | null>(null);
-  const [searchActive, setSearchActive] = useState(true);
+  const [chosenArtist, setChosenArtist] = useState<SpotifyArtist | null>(openRoomArtist);
+  const [searchActive, setSearchActive] = useState(() => !openRoomArtist());
   const [artistQuery, setArtistQuery] = useState('');
   const [artistMatches, setArtistMatches] = useState<SpotifyArtist[]>([]);
   const [searching, setSearching] = useState(false);
@@ -89,6 +96,28 @@ export default function HomeScreen() {
   const createRoom = useRoomStore((s) => s.createRoom);
   const joinRoom = useRoomStore((s) => s.joinRoom);
   const resetRoom = useRoomStore((s) => s.resetRoom);
+  const roomArtist = useRoomStore((s) => (s.isHost ? s.artist : null));
+
+  // Back on Home after leaving a room we only joined (Android back skips the
+  // lobby's ✕): that room was the host's, so let it go.
+  useFocusEffect(
+    useCallback(() => {
+      const r = useRoomStore.getState();
+      if (r.roomCode && !r.isHost && !r.joiningRoom && !useGameStore.getState().roomId) {
+        r.resetRoom();
+      }
+    }, [])
+  );
+
+  // Same, when Home stayed mounted: never show a live code without its artist.
+  useEffect(() => {
+    if (roomCode && roomArtist && !chosenArtist) {
+      setChosenArtist(roomArtist);
+      setSearchActive(false);
+      setShowCreate(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [roomCode, roomArtist]);
 
   // Dev-only smoke check: confirms the client reaches Supabase.
   useEffect(() => {

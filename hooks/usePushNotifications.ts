@@ -51,7 +51,11 @@ export function usePushNotifications(userId: string | undefined, ready: boolean)
     }, 300);
 
     const sub = AppState.addEventListener('change', (state) => {
-      if (state === 'active') clearEndedChallenges();
+      if (state !== 'active') return;
+      clearEndedChallenges();
+      // Notifications may have just been switched on in the phone's settings:
+      // make sure the server knows where to send them.
+      registerPush();
     });
     return () => {
       clearTimeout(t);
