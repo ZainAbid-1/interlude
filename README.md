@@ -25,6 +25,7 @@ Interlude is a real-time, two-player music guessing game for Android and iOS. Pi
 - **Notifications.** Challenges and friend requests reach you even when the app is closed, with Join and Decline right on the notification. Inside the app, messages use the same dark, themed cards, and you choose which alerts you get in Settings.
 - **Built for flaky networks.** Detects when the other player drops, pauses the match, and resyncs on reconnect.
 - **Server-side checks.** Answers are graded on the server, so a modified app can't claim a wrong answer was right.
+- **Fair endings.** Leaving a match counts as a loss, a player who disappears for a minute forfeits, a match can't be closed before its last round, and a closed app can rejoin its match.
 
 ---
 
@@ -192,8 +193,9 @@ In the Supabase **SQL editor**, run these files from `supabase/` **in this order
 | 7 | `scoring_device_time.sql` | Grades with the phone's answer time |
 | 8 | `elo.sql` | Elo ratings + the All artists board |
 | 9 | `notifications.sql` | Phone notifications for challenges and friend requests |
+| 10 | `match_integrity.sql` | Fair endings: forfeits, no early finishes, expiring room codes, busy friends |
 
-All files are safe to run more than once. `add_pool_options.sql` and `leaderboard_week_fix.sql` are upgrades for older databases and aren't needed on a fresh install.
+All files are safe to run more than once. Keep `match_integrity.sql` last: it replaces the match-finishing function from `elo.sql`, so if you ever re-run `elo.sql`, run `match_integrity.sql` again afterwards. `add_pool_options.sql` and `leaderboard_week_fix.sql` are upgrades for older databases and aren't needed on a fresh install.
 
 Then, in Supabase:
 - **Authentication → Providers:** enable **Google**.

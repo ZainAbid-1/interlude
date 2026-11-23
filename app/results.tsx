@@ -44,10 +44,12 @@ export default function ResultsScreen() {
     opponentId,
     myRating,
     myRatingChange,
+    forfeit,
   } = useGameStore();
 
-  const playerWins = playerScore > opponentScore;
-  const isDraw = playerScore === opponentScore;
+  // A forfeit decides the match whatever the score.
+  const playerWins = forfeit ? forfeit === 'opponent' : playerScore > opponentScore;
+  const isDraw = !forfeit && playerScore === opponentScore;
 
   /**
    * The match is over: clear the game AND the room (its code and artist live
@@ -92,7 +94,11 @@ export default function ResultsScreen() {
           </View>
           <Text style={styles.outcomeText}>{outcomeText}</Text>
           <Text style={styles.outcomeSubtext}>
-            {artistName} — {totalRounds} Rounds
+            {forfeit === 'opponent'
+              ? 'Your opponent left the match'
+              : forfeit === 'me'
+                ? 'You left the match'
+                : `${artistName} — ${totalRounds} Rounds`}
           </Text>
         </Animated.View>
 

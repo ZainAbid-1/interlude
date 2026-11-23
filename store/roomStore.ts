@@ -7,6 +7,7 @@ import {
   joinRoom as joinRoomRow,
   loadPool,
 } from '../services/rooms';
+import { supabase } from '../lib/supabase';
 import type { RoomPoolTrack } from '../services/rooms';
 
 type RoomStatus = 'idle' | 'waiting' | 'ready' | 'active' | 'completed';
@@ -22,6 +23,8 @@ interface RoomState {
   artistImage: string;
   /** The artist this host built the room for (null when joined as guest). */
   artist: SpotifyArtist | null;
+  /** When this phone made the room (ms); codes stop working after 30 min. */
+  createdAt: number;
 
   // Pool (persisted tracks with previews)
   poolId: string;
@@ -40,6 +43,8 @@ interface RoomState {
   // Actions (Supabase-backed)
   createRoom: (artist: SpotifyArtist) => Promise<{ ok: boolean; error?: string }>;
   joinRoom: (code: string) => Promise<{ ok: boolean; error?: string }>;
+  /** Reloads a match this player is in from the server (rejoining after a crash). */
+  resumeRoom: (roomId: string) => Promise<{ ok: boolean; error?: string }>;
   setReady: () => void;
   startMatch: () => void;
   resetRoom: () => void;
@@ -55,6 +60,7 @@ export const useRoomStore = create<RoomState>((set, get) => ({
   artistName: '',
   artistImage: '',
   artist: null,
+  createdAt: 0,
   poolId: '',
   poolTracks: [],
   isHost: false,
@@ -103,6 +109,7 @@ export const useRoomStore = create<RoomState>((set, get) => ({
       artistName: artist.name,
       artistImage: artist.image,
       artist,
+      createdAt: Date.now(),
       poolId: saved.poolId,
       poolTracks: pool.tracks.map((t, i) => ({
         id: '',
@@ -143,6 +150,7 @@ export const useRoomStore = create<RoomState>((set, get) => ({
       artistName: result.artist.name,
       artistImage: result.artist.image,
       artist: null,
+      createdAt: 0,
       poolId: result.room.track_pool_id,
       poolTracks: result.tracks,
       isHost: false,
@@ -168,6 +176,7 @@ export const useRoomStore = create<RoomState>((set, get) => ({
       artistName: '',
       artistImage: '',
       artist: null,
+      createdAt: 0,
       poolId: '',
       poolTracks: [],
       isHost: false,
@@ -177,6 +186,39 @@ export const useRoomStore = create<RoomState>((set, get) => ({
       joiningRoom: false,
       roomError: null,
     }),
+
+  resumeRoom: async (roomId) => {
+    if (!supabase) return { ok: false, error: 'Supabase is not configured' };
+    const me = (await supabase.auth.getUser()).data.user?.id;
+    const { data: room } = await supabase.from('rooms').select('*').eq('id', roomId).maybeSingle();
+    if (!room || !me) return { ok: false, error: 'That match is no longer available.' };
+    if (room.status !== 'active' || room.forfeit_by) {
+      return { ok: false, error: 'That match has already ended.' };
+    }
+    const pool = await loadPool(room.track_pool_id);
+    if ('error' in pool) return { ok: false, error: pool.error };
+    const isHost = room.host_id === me;
+    set({
+      roomId: room.id,
+      roomCode: room.code,
+      roomStatus: 'active',
+      hostName: isHost ? 'You' : 'Host',
+      guestName: isHost ? null : 'You',
+      artistName: pool.artist.name,
+      artistImage: pool.artist.image,
+      artist: isHost ? pool.artist : null,
+      createdAt: Date.parse(room.created_at) || 0,
+      poolId: room.track_pool_id,
+      poolTracks: pool.tracks,
+      isHost,
+      isReady: true,
+      opponentReady: true,
+      creatingRoom: false,
+      joiningRoom: false,
+      roomError: null,
+    });
+    return { ok: true };
+  },
 
   // Reload a room's pool by id (useful on rematch / reconnect)
   loadPoolById: async (poolId: string) => {

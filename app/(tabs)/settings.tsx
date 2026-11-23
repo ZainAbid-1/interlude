@@ -332,6 +332,7 @@ export default function SettingsScreen() {
                 <HelpLine icon="close-circle-outline" text="Wrong answer or no answer: 0 points." />
                 <HelpLine icon="podium-outline" text="Artist boards rank your best single match for that artist." />
                 <HelpLine icon="trending-up-outline" text="All artists ranks by rating. Everyone starts at 1,000; beating a stronger player earns more, beating a weaker one less." />
+                <HelpLine icon="exit-outline" text="Leaving a match that has started counts as a loss. If your opponent disappears for over a minute, you win." />
               </View>
             ) : null}
           </GlassCard>

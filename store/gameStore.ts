@@ -12,6 +12,8 @@ import {
   submitRoundAnswer,
   fetchRoundAnswers,
 } from '../services/rounds';
+import { saveActiveMatch, clearActiveMatch } from '../services/activeMatch';
+import { useRoomStore } from './roomStore';
 
 type RoundState = 'idle' | 'countdown' | 'playing' | 'answered' | 'result';
 
@@ -74,6 +76,8 @@ interface GameState {
   /** Elo rating after this match and the change it caused (from finalize_match). */
   myRating: number | null;
   myRatingChange: number | null;
+  /** The match ended by forfeit: 'me' = this player left, 'opponent' = they did. */
+  forfeit: 'me' | 'opponent' | null;
 
   // Round history
   roundResults: RoundResult[];
@@ -504,6 +508,7 @@ async function presenceTick() {
     return;
   }
   sendPresence('hb');
+  touchRoom();
 
   // Network fine but our socket stopped answering heartbeats: it's stale.
   if (now - lastSocketOk > SOCKET_STALE_MS) {
@@ -545,6 +550,122 @@ function markOpponentGone(status: 'left' | 'ended') {
   setOpponentStatus(status);
   clearTimers();
   clearPolling();
+  // The server decides the result: they left → we win; we were the one gone
+  // too long → they've claimed it, so fetch the (lost) result.
+  if (status === 'left') void claimWin();
+  else void waitForClosedMatch();
+}
+
+// ─── Server check-ins and results ───────────────────────────────────────
+
+/** How often this phone tells the server it's still in the match. */
+const TOUCH_MS = 8000;
+let lastTouchAt = 0;
+function touchRoom(force = false) {
+  const { roomId, gameOver } = useGameStore.getState();
+  if (!supabase || !roomId || gameOver) return;
+  if (!force && Date.now() - lastTouchAt < TOUCH_MS) return;
+  lastTouchAt = Date.now();
+  void supabase.rpc('touch_room', { p_room: roomId }).then(
+    () => {},
+    () => {}
+  );
+}
+
+type FinalRow = {
+  player_id: string;
+  total_score: number;
+  correct_count: number;
+  outcome: string | null;
+  rating?: number | null;
+  rating_change?: number | null;
+  forfeited?: boolean | null;
+};
+
+/** Shows the server's final result for this match and ends it on this phone. */
+function applyFinalRows(roomId: string, rows: FinalRow[]) {
+  const state = useGameStore.getState();
+  if (state.roomId !== roomId || state.gameOver) return;
+  const mine = rows.find((r) => r.player_id === state.playerId);
+  const theirs = rows.find((r) => r.player_id !== state.playerId);
+  // The results screen keeps the scores this phone showed during the match.
+  // The server's totals can briefly lag (the other phone's last answer may
+  // still be on its way), which made scores jump right after the match.
+  clearTimers();
+  clearPolling();
+  void clearActiveMatch();
+  useGameStore.setState({
+    opponentId: theirs?.player_id ?? state.opponentId,
+    myRating: mine?.rating ?? null,
+    myRatingChange: mine?.rating_change ?? null,
+    forfeit: mine?.forfeited ? 'me' : theirs?.forfeited ? 'opponent' : null,
+    gameOver: true,
+  });
+}
+
+const errText = (e: unknown) => String((e as { message?: string })?.message ?? e ?? '');
+
+/** The opponent left or vanished: ask the server for the win. It agrees once
+ *  they've forfeited or been silent for 45 s, so keep asking for a while. */
+async function claimWin() {
+  const roomId = useGameStore.getState().roomId;
+  if (!supabase || !roomId) return;
+  for (let attempt = 0; attempt < 16; attempt++) {
+    const { data, error } = await supabase.rpc('claim_forfeit', { p_room: roomId });
+    if (!error && Array.isArray(data) && data.length > 0) {
+      applyFinalRows(roomId, data as FinalRow[]);
+      return;
+    }
+    if (error && !/OPPONENT_STILL_HERE|network|fetch/i.test(errText(error))) return;
+    if (useGameStore.getState().roomId !== roomId) return;
+    await sleep(5000);
+  }
+}
+
+/** We were the one away too long: the opponent's claim closes the match. */
+async function waitForClosedMatch() {
+  const roomId = useGameStore.getState().roomId;
+  for (let attempt = 0; attempt < 20; attempt++) {
+    if (useGameStore.getState().roomId !== roomId || useGameStore.getState().gameOver) return;
+    const room = await fetchRoom(roomId);
+    if (room?.status === 'completed') {
+      await loadFinalResults(roomId);
+      return;
+    }
+    await sleep(3000);
+  }
+}
+
+/** The room was closed (by us, the other phone, or a forfeit): fetch the result. */
+let loadingFinal: string | null = null;
+async function loadFinalResults(roomId: string) {
+  if (!supabase || loadingFinal === roomId || useGameStore.getState().gameOver) return;
+  loadingFinal = roomId;
+  try {
+    const { data, error } = await supabase.rpc('finalize_match', { p_room: roomId });
+    if (!error && Array.isArray(data)) applyFinalRows(roomId, data as FinalRow[]);
+    else if (useGameStore.getState().roomId === roomId) useGameStore.setState({ gameOver: true });
+  } finally {
+    loadingFinal = null;
+  }
+}
+
+/**
+ * This player leaves mid-match: it counts as a loss. Waits at most a few
+ * seconds for the server; if it can't be reached, the opponent's phone
+ * claims the win once we stop checking in.
+ */
+export async function forfeitMatch(): Promise<void> {
+  const roomId = useGameStore.getState().roomId;
+  if (!supabase || !roomId) return;
+  await Promise.race([
+    supabase.rpc('forfeit_match', { p_room: roomId }).then(
+      () => {},
+      () => {}
+    ),
+    sleep(4000),
+  ]);
+  void clearActiveMatch();
 }
 
 /** Resolves once the opponent is connected; never resolves if they left. */
@@ -610,6 +731,7 @@ export const useGameStore = create<GameState>((set, get) => ({
   opponentCorrectCount: 0,
   myRating: null,
   myRatingChange: null,
+  forfeit: null,
   roundResults: [],
   gameOver: false,
   loading: false,
@@ -706,6 +828,7 @@ export const useGameStore = create<GameState>((set, get) => ({
       opponentCorrectCount: 0,
       myRating: null,
       myRatingChange: null,
+      forfeit: null,
       roundResults: [],
       myAnswered: false,
       opponentAnswered: false,
@@ -795,6 +918,8 @@ export const useGameStore = create<GameState>((set, get) => ({
   },
 
   resetGame: () => {
+    void clearActiveMatch();
+    lastTouchAt = 0;
     clearTimers();
     clearPolling();
     teardownChannel();
@@ -826,6 +951,7 @@ export const useGameStore = create<GameState>((set, get) => ({
       opponentCorrectCount: 0,
       myRating: null,
       myRatingChange: null,
+      forfeit: null,
       roundResults: [],
       gameOver: false,
       loading: false,
@@ -938,8 +1064,8 @@ function pollRoomSync(roomId: string) {
     const room = await fetchRoom(roomId);
     if (!room) return;
     if (room.status === 'completed') {
-      useGameStore.setState({ gameOver: true });
       clearStartPoll();
+      void loadFinalResults(roomId);
       return;
     }
     if (room.status === 'waiting') {
@@ -995,7 +1121,7 @@ function onRoomRow(room: any) {
     return;
   }
   if (room.status === 'completed') {
-    useGameStore.setState({ gameOver: true });
+    void loadFinalResults(room.id);
     return;
   }
   processActiveRoom(room);
@@ -1238,6 +1364,9 @@ async function loadRounds(roomId: string, poolId: string): Promise<boolean> {
  */
 async function loadRoundsFromRoom(room: any) {
   const loaded = await loadRounds(room.id, room.track_pool_id);
+  if (loaded && room.status === 'active' && room.current_round > 1) {
+    await restorePastRounds(room.current_round);
+  }
   if (loaded && room.status === 'active' && room.current_round >= 1) {
     clearAnswerPoll();
     await ensureClockSync();
@@ -1278,6 +1407,13 @@ function beginRound(roundIndex: number, startAtHost?: number | null) {
   clearTimers();
   clearAnswerPoll();
   roundTiming = { index: roundIndex, synced: timing.synced, startAtLocal: timing.at };
+  void saveActiveMatch({
+    roomId: state.roomId,
+    code: useRoomStore.getState().roomCode,
+    isHost: state.isHost,
+    artistName: state.artistName,
+  });
+  touchRoom(roundIndex === 1);
   // Make sure this round's clip is buffering (no-op if preloaded) and keep the
   // next two rounds downloading in the background.
   preloadRounds(roundIndex, 3);
@@ -1354,6 +1490,48 @@ function beginRound(roundIndex: number, startAtHost?: number | null) {
       // (that made the safety timeout fire a full countdown late).
     }, Math.max(0, roundStartMs + ROUND_DURATION_MS + 500 - Date.now()));
   }, until(roundStartMs));
+}
+
+/**
+ * Rejoining mid-match (e.g. after the app was closed): rebuild the score and
+ * round history from the saved answers of the rounds already played.
+ */
+async function restorePastRounds(currentRound: number) {
+  const s = useGameStore.getState();
+  if (s.roundResults.length > 0 || !supabase) return;
+  const past = s.rounds.filter((r) => r.roundIndex < currentRound);
+  if (past.length === 0) return;
+  const { data } = await supabase
+    .from('round_answers')
+    .select('round_id, player_id, choice, is_correct, points_awarded')
+    .in('round_id', past.map((r) => r.id));
+  const answers = (data ?? []) as Array<{
+    round_id: string;
+    player_id: string;
+    choice: string | null;
+    is_correct: boolean | null;
+    points_awarded: number | null;
+  }>;
+  let playerScore = 0, opponentScore = 0, playerCorrectCount = 0, opponentCorrectCount = 0;
+  const roundResults: RoundResult[] = past
+    .sort((a, b) => a.roundIndex - b.roundIndex)
+    .map((r) => {
+      const mine = answers.find((a) => a.round_id === r.id && a.player_id === s.playerId);
+      const theirs = answers.find((a) => a.round_id === r.id && a.player_id !== s.playerId);
+      playerScore += mine?.points_awarded ?? 0;
+      opponentScore += theirs?.points_awarded ?? 0;
+      playerCorrectCount += mine?.is_correct ? 1 : 0;
+      opponentCorrectCount += theirs?.is_correct ? 1 : 0;
+      return {
+        roundIndex: r.roundIndex,
+        playerAnswer: mine?.choice || null,
+        playerCorrect: mine?.is_correct === true,
+        playerPoints: mine?.points_awarded ?? 0,
+        opponentCorrect: theirs?.is_correct === true,
+        opponentPoints: theirs?.points_awarded ?? 0,
+      };
+    });
+  useGameStore.setState({ playerScore, opponentScore, playerCorrectCount, opponentCorrectCount, roundResults });
 }
 
 async function seedRoundAnswers(roundId: string) {
@@ -1497,34 +1675,21 @@ async function finalizeMatch() {
 
   // finalize_match (supabase/security.sql) totals both players from the
   // server-graded answers, writes match_results and completes the room.
-  const { data: final, error: finalErr } = await supabase!.rpc('finalize_match', {
+  let { data: final, error: finalErr } = await supabase!.rpc('finalize_match', {
     p_room: state.roomId,
   });
+  // The server only accepts the finish once the last round has really been
+  // played; the other phone's last answer may still be on its way.
+  for (let attempt = 0; attempt < 8 && finalErr && /MATCH_NOT_FINISHED/.test(finalErr.message); attempt++) {
+    await sleep(1500);
+    if (useGameStore.getState().roomId !== state.roomId || useGameStore.getState().gameOver) return;
+    ({ data: final, error: finalErr } = await supabase!.rpc('finalize_match', { p_room: state.roomId }));
+  }
   if (!finalErr && Array.isArray(final)) {
-    const rows = final as Array<{
-      player_id: string;
-      total_score: number;
-      correct_count: number;
-      outcome: string | null;
-      /** Present once supabase/elo.sql has been run. */
-      rating?: number | null;
-      rating_change?: number | null;
-    }>;
-    // The results screen keeps the scores this phone showed during the match.
-    // The server's totals can briefly lag (the other phone's last answer may
-    // still be on its way), which made scores jump right after the match.
-    // finalize_match still records the match; whichever phone calls it last
-    // saves the complete totals for the leaderboard.
-    const mine = rows.find((r) => r.player_id === state.playerId);
-    const theirs = rows.find((r) => r.player_id !== state.playerId);
-    useGameStore.setState({
-      opponentId: theirs?.player_id ?? state.opponentId,
-      myRating: mine?.rating ?? null,
-      myRatingChange: mine?.rating_change ?? null,
-      gameOver: true,
-    });
+    applyFinalRows(state.roomId, final as FinalRow[]);
     return;
   }
+
   if (finalErr && finalErr.code !== 'PGRST202') {
     // Server refused (e.g. not a player): show what we have locally.
     console.warn('[game] finalize failed', finalErr.message);

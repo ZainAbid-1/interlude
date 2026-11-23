@@ -36,6 +36,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Clipboard from 'expo-clipboard';
 import { notify, confirm } from '../../store/noticeStore';
 import { offerPushNotifications } from '../../services/push';
+import { offerRejoin } from '../../services/rejoin';
 
 import { GlassCard } from '../../components/GlassCard';
 import { AlbumCollageBackground } from '../../components/AlbumCollageBackground';
@@ -97,6 +98,23 @@ export default function HomeScreen() {
   const joinRoom = useRoomStore((s) => s.joinRoom);
   const resetRoom = useRoomStore((s) => s.resetRoom);
   const roomArtist = useRoomStore((s) => (s.isHost ? s.artist : null));
+
+  // Room codes stop working after 30 minutes; a match cut off by a crash can
+  // still be rejoined for about a minute.
+  useFocusEffect(
+    useCallback(() => {
+      const r = useRoomStore.getState();
+      if (
+        r.roomCode && r.isHost && r.createdAt &&
+        Date.now() - r.createdAt > 30 * 60 * 1000 &&
+        !useGameStore.getState().roomId
+      ) {
+        r.resetRoom();
+        notify.info('Your room expired', 'Pick an artist to make a new one.', { icon: 'time-outline' });
+      }
+      void offerRejoin();
+    }, [])
+  );
 
   // Back on Home after leaving a room we only joined (Android back skips the
   // lobby's ✕): that room was the host's, so let it go.
@@ -266,6 +284,17 @@ export default function HomeScreen() {
     setInvitingId(friend.id);
     const res = await useInviteStore.getState().invite(friend, roomId);
     setInvitingId(null);
+    if (res.error && /BUSY/.test(res.error)) {
+      notify.info(`${friend.name} is in a match right now`, 'Try again in a few minutes.', {
+        icon: 'hourglass-outline',
+      });
+      return;
+    }
+    if (res.error && /expired/i.test(res.error)) {
+      resetRoom();
+      notify.info('Your room expired', 'Pick an artist again to make a new one.', { icon: 'time-outline' });
+      return;
+    }
     if (res.error) {
       notify.error(`Couldn't challenge ${friend.name}`, res.error, {
         action: { label: 'Try again', onPress: () => challengeFriend(friend) },

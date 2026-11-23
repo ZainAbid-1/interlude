@@ -8,6 +8,7 @@ import {
   Pressable,
   ActivityIndicator,
   ScrollView,
+  BackHandler,
 } from 'react-native';
 import { router } from 'expo-router';
 import Animated, {
@@ -26,7 +27,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { GlassCard } from '../components/GlassCard';
 import { AnswerButton } from '../components/AnswerButton';
 import { ProgressBar } from '../components/ProgressBar';
-import { useGameStore, ROUND_DURATION_MS, getRoundStartAt } from '../store/gameStore';
+import { useGameStore, ROUND_DURATION_MS, getRoundStartAt, forfeitMatch } from '../store/gameStore';
+import { confirm } from '../store/noticeStore';
 import { useRoomStore } from '../store/roomStore';
 import { useInviteStore } from '../store/inviteStore';
 import { useClipPlayback, CLIP_DURATION_MS } from '../hooks/useClipPlayback';
@@ -169,6 +171,45 @@ export default function GameScreen() {
     }
   })();
 
+  /**
+   * ✕ / Back / Leave. Once the match has started, leaving is a forfeit, so
+   * ask first. In the lobby (or once the match is decided) just go.
+   */
+  const requestExit = useCallback(async () => {
+    const g = useGameStore.getState();
+    const decided =
+      g.gameOver || g.opponentStatus === 'left' || g.opponentStatus === 'ended';
+    if (!g.currentRound || decided) {
+      exitMatch();
+      return;
+    }
+    const opponentAway = g.opponentStatus === 'reconnecting';
+    const ok = await confirm({
+      title: 'Leave this match?',
+      message: opponentAway
+        ? "Leaving now counts as a loss. Your opponent lost connection: if they don't come back within a minute, the win is yours."
+        : 'It counts as a loss, and your rating will go down.',
+      confirmLabel: 'Leave and lose',
+      cancelLabel: opponentAway ? 'Wait for them' : 'Keep playing',
+      destructive: true,
+      icon: 'exit-outline',
+    });
+    if (!ok) return;
+    await forfeitMatch();
+    exitMatch();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Android's back button asks the same question instead of quietly leaving.
+  useEffect(() => {
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (useGameStore.getState().gameOver) return false;
+      void requestExit();
+      return true;
+    });
+    return () => sub.remove();
+  }, [requestExit]);
+
   /** Leave mid-match: tell the opponent, drop the room, go home. */
   const exitMatch = useCallback(() => {
     // A pending challenge must not let a friend join a dead room.
@@ -279,7 +320,7 @@ export default function GameScreen() {
   if (loading || !currentRound) {
     return (
       <View style={[styles.screen, { paddingTop: insets.top }]}>
-        <ConnectionOverlay onExit={exitMatch} />
+        <ConnectionOverlay onExit={requestExit} />
         {error ? (
           <View style={styles.loadingBlock}>
             <Text style={styles.errorText}>{error}</Text>
@@ -338,7 +379,7 @@ export default function GameScreen() {
       entering={FadeIn.duration(350)}
       style={[styles.screen, { paddingTop: insets.top, paddingBottom: insets.bottom }]}
     >
-      <ConnectionOverlay onExit={exitMatch} />
+      <ConnectionOverlay onExit={requestExit} />
 
       {/* Countdown Overlay */}
       {roundState === 'countdown' && (
@@ -357,7 +398,12 @@ export default function GameScreen() {
       {/* Header */}
       <Animated.View entering={FadeIn.delay(200)} style={styles.header}>
         <View style={styles.headerLeft}>
-          <Pressable onPress={exitMatch} style={styles.backButton}>
+          <Pressable
+            onPress={requestExit}
+            style={styles.backButton}
+            accessibilityRole="button"
+            accessibilityLabel="Leave match"
+          >
             <Ionicons name="close" size={24} color={Colors.primary} />
           </Pressable>
           <Text style={styles.roundCounter}>
@@ -574,14 +620,15 @@ function ConnectionOverlay({ onExit }: { onExit: () => void }) {
   let action: string;
 
   if (opponentStatus === 'left') {
-    icon = 'account-off-outline';
+    icon = 'trophy-outline';
     title = `${other} left the match`;
-    body = "This match can't continue. No scores were recorded.";
+    body = 'You win this one. Saving the result…';
+    waiting = true;
     action = 'Back to Home';
   } else if (opponentStatus === 'ended') {
     icon = 'timer-off-outline';
     title = 'The match ended while you were away';
-    body = `${other} couldn't reach you for too long, so the match was stopped.`;
+    body = `${other} couldn't reach you for over a minute, so it counts as a loss.`;
     action = 'Back to Home';
   } else if (selfConnection === 'reconnecting') {
     icon = 'wifi-off';

@@ -8,6 +8,7 @@ import { setPushToken } from './pushToken';
 import { notify, confirm } from '../store/noticeStore';
 import { useInviteStore } from '../store/inviteStore';
 import { joinChallenge, declineChallenge } from './challenge';
+import { useGameStore, forfeitMatch } from '../store/gameStore';
 
 /**
  * Phone notifications (the ones that arrive while the app is closed).
@@ -256,6 +257,20 @@ export async function handleResponse(response: Notifications.NotificationRespons
     return;
   }
   if (response.actionIdentifier === 'join') {
+    // Joining means leaving the match in progress, which is a forfeit.
+    const g = useGameStore.getState();
+    if (g.roomId && g.currentRound && !g.gameOver) {
+      const leave = await confirm({
+        title: `Leave your match to join ${name.replace(/^@/, '')}?`,
+        message: 'Your current match will count as a loss.',
+        confirmLabel: 'Leave and join',
+        cancelLabel: 'Keep playing',
+        destructive: true,
+        icon: 'swap-horizontal',
+      });
+      if (!leave) return; // the challenge waits until this match ends
+      await forfeitMatch();
+    }
     await joinChallenge(invite);
     return;
   }
