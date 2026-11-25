@@ -44,3 +44,7 @@ yarn-error.*
 # Firebase config for push notifications (added as an EAS file variable)
 google-services.json
 GoogleService-Info.plist
+
+# Marketing renders (contain licensed music and album art; kept local)
+marketing/*.mp4
+marketing/*.mov

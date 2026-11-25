@@ -36,6 +36,9 @@ import { Colors, Spacing, BorderRadius } from '../constants/theme';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
+/** The Interlude mark (cream note on transparent), shown until the cover is revealed. */
+const INTERLUDE_MARK = require('../assets/android-icon-foreground.png');
+
 type AnswerState = 'default' | 'selected' | 'correct' | 'incorrect' | 'dimmed';
 
 export default function GameScreen() {
@@ -436,18 +439,15 @@ export default function GameScreen() {
                 {/* Placeholder stays underneath so the box is never blank
                     while the cover is still loading. */}
                 <View style={styles.albumArtPlaceholder}>
-                  <MaterialCommunityIcons
-                    name="music-note"
-                    size={48}
-                    color={Colors.textSubtle}
+                  <Image
+                    source={INTERLUDE_MARK}
+                    style={styles.albumArtLogo}
+                    accessibilityIgnoresInvertColors
+                    accessible={false}
                   />
-                  <Text style={styles.albumArtHint}>
-                    {!revealTrack
-                      ? 'Listen to the clip'
-                      : coverUrl
-                        ? 'Loading cover…'
-                        : 'Guess the track'}
-                  </Text>
+                  {revealTrack && coverUrl && !coverLoaded ? (
+                    <Text style={styles.albumArtHint}>Loading cover…</Text>
+                  ) : null}
                 </View>
                 {revealTrack && coverUrl ? (
                   <Image
@@ -482,9 +482,9 @@ export default function GameScreen() {
                         ? (currentRound.track?.track_name ?? 'Playing')
                         : 'Guess the track'}
                     </Text>
-                    <Text style={styles.artistSubText}>
-                      {revealTrack ? 'Correct answer' : 'Tap to hear a clip'}
-                    </Text>
+                    {revealTrack ? (
+                      <Text style={styles.artistSubText}>Correct answer</Text>
+                    ) : null}
                   </View>
                   <MaterialCommunityIcons
                     name={roundState === 'playing' ? 'volume-high' : 'music-note'}
@@ -884,6 +884,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: Colors.surfaceContainerLow,
     gap: Spacing.sm,
+  },
+  albumArtLogo: {
+    // The mark fills ~60% of its square image, so this reads as ~84px.
+    width: 140,
+    height: 140,
+    opacity: 0.9,
   },
   albumArtHint: {
     fontFamily: 'Inter',
