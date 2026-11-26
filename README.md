@@ -194,6 +194,7 @@ In the Supabase **SQL editor**, run these files from `supabase/` **in this order
 | 8 | `elo.sql` | Elo ratings + the All artists board |
 | 9 | `notifications.sql` | Phone notifications for challenges and friend requests |
 | 10 | `match_integrity.sql` | Fair endings: forfeits, no early finishes, expiring room codes, busy friends |
+| 11 | `account_deletion.sql` | Lets players delete their account from Settings (required by Google Play) |
 
 All files are safe to run more than once. Keep `match_integrity.sql` last: it replaces the match-finishing function from `elo.sql`, so if you ever re-run `elo.sql`, run `match_integrity.sql` again afterwards. `add_pool_options.sql` and `leaderboard_week_fix.sql` are upgrades for older databases and aren't needed on a fresh install.
 

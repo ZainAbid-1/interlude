@@ -9,6 +9,7 @@ import {
   AppState,
   Linking,
 } from 'react-native';
+import { CONTACT_EMAIL, NOT_AFFILIATED, PRIVACY_POLICY_URL } from '../../services/musicLinks';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -156,6 +157,33 @@ export default function SettingsScreen() {
     const result = await requestPushPermission();
     refreshPush();
     if (result === 'granted') notify.success('Notifications are on');
+  };
+
+  const [deleting, setDeleting] = useState(false);
+  const handleDeleteAccount = async () => {
+    const ok = await confirm({
+      title: 'Delete your account?',
+      message:
+        'This permanently erases your profile, username, friends, ratings and match answers, and signs you out. Matches you finished stay for your opponents, without you. This cannot be undone.',
+      confirmLabel: 'Delete my account',
+      cancelLabel: 'Keep my account',
+      destructive: true,
+      icon: 'trash-outline',
+    });
+    if (!ok || !supabase) return;
+    setDeleting(true);
+    const { error } = await supabase.rpc('delete_my_account');
+    if (error) {
+      setDeleting(false);
+      notify.error("Couldn't delete your account", 'Check your connection and try again.', {
+        action: { label: 'Try again', onPress: handleDeleteAccount },
+      });
+      return;
+    }
+    await signOut();
+    setDeleting(false);
+    router.replace('/login');
+    notify.success('Your account was deleted', 'Thanks for playing Interlude.');
   };
 
   const handleSignOut = async () => {
@@ -343,7 +371,24 @@ export default function SettingsScreen() {
           <SectionLabel>About</SectionLabel>
           <GlassCard borderRadius={20} padding={0}>
             <Row icon="information-circle-outline" title="Version" value={APP_VERSION} />
+            <Row
+              divider
+              icon="shield-checkmark-outline"
+              title="Privacy policy"
+              hint="What Interlude stores and why"
+              onPress={() => Linking.openURL(PRIVACY_POLICY_URL).catch(() => {})}
+            />
+            <Row
+              divider
+              icon="mail-outline"
+              title="Contact"
+              hint={CONTACT_EMAIL}
+              onPress={() =>
+                Linking.openURL(`mailto:${CONTACT_EMAIL}?subject=${encodeURIComponent('Interlude')}`).catch(() => {})
+              }
+            />
           </GlassCard>
+          <Text style={styles.disclaimer}>{NOT_AFFILIATED}</Text>
         </Animated.View>
 
         {/* Sign out / in */}
@@ -375,6 +420,24 @@ export default function SettingsScreen() {
             </Pressable>
           )}
         </Animated.View>
+
+        {isLoggedIn ? (
+          <Pressable
+            onPress={handleDeleteAccount}
+            disabled={deleting}
+            accessibilityRole="button"
+            accessibilityLabel="Delete account"
+            hitSlop={8}
+          >
+            <View style={styles.deleteRow}>
+              {deleting ? (
+                <ActivityIndicator color={DANGER} size="small" />
+              ) : (
+                <Text style={styles.deleteText}>Delete account</Text>
+              )}
+            </View>
+          </Pressable>
+        ) : null}
 
         <Text style={styles.footerText}>Interlude {APP_VERSION}</Text>
       </ScrollView>
@@ -753,6 +816,20 @@ const styles = StyleSheet.create({
   },
   loginButton: { backgroundColor: '#ffffff' },
   bigButtonText: { fontFamily: 'Inter-Bold', fontSize: 15 },
+  disclaimer: {
+    fontFamily: 'Inter',
+    fontSize: 11,
+    lineHeight: 16,
+    color: Colors.textMuted,
+    marginTop: Spacing.sm,
+    paddingHorizontal: Spacing.xs,
+  },
+  deleteRow: {
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  deleteText: { fontFamily: 'Inter-Bold', fontSize: 14, color: DANGER },
   footerText: {
     fontFamily: 'Inter',
     fontSize: 12,

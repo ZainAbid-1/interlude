@@ -29,6 +29,7 @@ import { AnswerButton } from '../components/AnswerButton';
 import { ProgressBar } from '../components/ProgressBar';
 import { useGameStore, ROUND_DURATION_MS, getRoundStartAt, forfeitMatch } from '../store/gameStore';
 import { confirm } from '../store/noticeStore';
+import { previewCredit } from '../services/musicLinks';
 import { useRoomStore } from '../store/roomStore';
 import { useInviteStore } from '../store/inviteStore';
 import { useClipPlayback, CLIP_DURATION_MS } from '../hooks/useClipPlayback';
@@ -483,7 +484,10 @@ export default function GameScreen() {
                         : 'Guess the track'}
                     </Text>
                     {revealTrack ? (
-                      <Text style={styles.artistSubText}>Correct answer</Text>
+                      <Text style={styles.artistSubText}>
+                        Correct answer
+                        {currentRound.track ? ` · ${previewCredit(currentRound.track)}` : ''}
+                      </Text>
                     ) : null}
                   </View>
                   <MaterialCommunityIcons

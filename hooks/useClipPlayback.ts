@@ -22,9 +22,10 @@ const MIN_AUDIBLE_MS = 1000;
  * Plays a 3-second slice of a preview clip, seeking to `startMs`.
  * A new player is created per source so round changes load cleanly.
  *
- * `downloadFirst` fully buffers the remote MP3 (iTunes/Deezer previews) before
- * playback is allowed. This is what avoids the "silent no-op" where `play()`
- * is called on a not-yet-buffered player over a spotty mobile connection.
+ * Previews are streamed, never saved to the phone (the providers' terms allow
+ * streaming only). Playback starts once the stream reports it is loaded and
+ * not buffering, which avoids the "silent no-op" where `play()` is called on
+ * a not-yet-buffered player over a spotty mobile connection.
  *
  * `clipStarted` flips to `true` only when the player actually reports it is
  * playing (a real `playbackStatusUpdate`), NOT when `playClip()` is called.

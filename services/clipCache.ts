@@ -42,8 +42,12 @@ const MAX_PRELOADED = 4;
 /** URLs whose player the game screen is using right now. */
 const inUse = new Set<string>();
 
+/**
+ * Previews are streamed (buffered in memory) and never written to the phone:
+ * Apple's and Deezer's preview terms allow streaming only, no saved copies.
+ */
 export function createClipPlayer(url: string): AudioPlayer {
-  const player = createAudioPlayer({ uri: url }, { downloadFirst: true, updateInterval: 100 });
+  const player = createAudioPlayer({ uri: url }, { updateInterval: 100 });
   player.volume = 1.0;
   return player;
 }
@@ -57,9 +61,8 @@ export function createClipPlayer(url: string): AudioPlayer {
  * players and after a few matches new clips played silently until the app
  * was restarted.
  *
- * With `downloadFirst`, expo-audio swaps in the downloaded file a moment
- * after creation; releasing before that makes its internal `replace()` throw.
- * So a player that hasn't loaded yet is released once it has (or after 20s).
+ * A player that hasn't finished loading its stream yet is released once it
+ * has (or after 20s), so release never races the native setup.
  */
 export function disposeClipPlayer(player: AudioPlayer) {
   const free = () => {

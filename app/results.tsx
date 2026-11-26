@@ -6,6 +6,7 @@ import {
   ScrollView,
   Pressable,
   ActivityIndicator,
+  Linking,
 } from 'react-native';
 import { router } from 'expo-router';
 import Animated, {
@@ -29,6 +30,24 @@ import {
 import { Colors, Spacing, BorderRadius } from '../constants/theme';
 import { notify } from '../store/noticeStore';
 import { offerPushNotifications } from '../services/push';
+import { songLinks, previewCredit, NOT_AFFILIATED } from '../services/musicLinks';
+
+/** "Listen on …" link to the full song (credits the source, sends fans to the artist). */
+function ListenButton({ icon, label, url }: { icon: 'spotify' | 'apple'; label: string; url: string }) {
+  return (
+    <Pressable
+      onPress={() => Linking.openURL(url).catch(() => {})}
+      hitSlop={6}
+      accessibilityRole="link"
+      accessibilityLabel={`Listen on ${label}`}
+    >
+      <View style={styles.listenButton}>
+        <MaterialCommunityIcons name={icon} size={14} color="#ffffff" />
+        <Text style={styles.listenText}>{label}</Text>
+      </View>
+    </Pressable>
+  );
+}
 
 export default function ResultsScreen() {
   const insets = useSafeAreaInsets();
@@ -45,6 +64,7 @@ export default function ResultsScreen() {
     myRating,
     myRatingChange,
     forfeit,
+    rounds,
   } = useGameStore();
 
   // A forfeit decides the match whatever the score.
@@ -159,9 +179,37 @@ export default function ResultsScreen() {
                     <View style={styles.roundLeft}>
                       <Text style={styles.roundIndex}>R{result.roundIndex}</Text>
                       <View style={{ flex: 1, paddingRight: 8 }}>
-                        <Text style={styles.roundAnswer}>
-                          {result.playerAnswer || 'No answer'}
-                        </Text>
+                        {(() => {
+                          const track = rounds.find((r) => r.roundIndex === result.roundIndex)?.track;
+                          const song = track?.track_name ?? result.playerAnswer ?? 'Unknown song';
+                          return (
+                            <>
+                              <Text style={styles.roundSong}>{song}</Text>
+                              {!result.playerCorrect ? (
+                                <Text style={styles.roundPicked}>
+                                  {result.playerAnswer ? `You picked ${result.playerAnswer}` : 'No answer'}
+                                </Text>
+                              ) : null}
+                              {track ? (
+                                <>
+                                  <Text style={styles.roundCredit}>{previewCredit(track)}</Text>
+                                  <View style={styles.listenRow}>
+                                    <ListenButton
+                                      icon="spotify"
+                                      label="Spotify"
+                                      url={songLinks(track, artistName).spotify}
+                                    />
+                                    <ListenButton
+                                      icon="apple"
+                                      label="Apple Music"
+                                      url={songLinks(track, artistName).appleMusic}
+                                    />
+                                  </View>
+                                </>
+                              ) : null}
+                            </>
+                          );
+                        })()}
                       </View>
                     </View>
                     <View style={styles.roundRight}>
@@ -190,6 +238,8 @@ export default function ResultsScreen() {
             ))}
           </View>
         </Animated.View>
+
+        <Text style={styles.disclaimer}>{NOT_AFFILIATED}</Text>
 
         {/* Actions */}
         <Animated.View
@@ -424,6 +474,54 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter',
     fontSize: 14,
     color: Colors.onSurface,
+  },
+  roundSong: {
+    fontFamily: 'Inter-Bold',
+    fontSize: 14,
+    color: Colors.onSurface,
+  },
+  roundPicked: {
+    fontFamily: 'Inter',
+    fontSize: 12,
+    color: Colors.incorrect,
+    marginTop: 2,
+  },
+  roundCredit: {
+    fontFamily: 'Inter',
+    fontSize: 11,
+    color: Colors.textMuted,
+    marginTop: 4,
+  },
+  listenRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 8,
+  },
+  listenButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    height: 32,
+    paddingHorizontal: 12,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.14)',
+  },
+  listenText: {
+    fontFamily: 'Inter-Bold',
+    fontSize: 12,
+    color: '#ffffff',
+  },
+  disclaimer: {
+    fontFamily: 'Inter',
+    fontSize: 11,
+    lineHeight: 16,
+    color: Colors.textMuted,
+    textAlign: 'center',
+    marginTop: Spacing.lg,
+    paddingHorizontal: Spacing.sm,
   },
   roundRight: {
     alignItems: 'flex-end',
